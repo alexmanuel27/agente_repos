@@ -1,25 +1,42 @@
 # Git Repo Checker
 
-Agente que revisa cada hora si alguno de los repos en `/Users/alex/Nube /repos/` está
-desactualizado respecto a su remoto, y avisa con una notificación nativa de macOS.
+Agente que revisa cada hora si alguno de los repos vigilados está desactualizado
+respecto a su remoto y/o tiene cambios sin commitear, y avisa con una
+notificación nativa de macOS.
+
+## Qué repos vigila
+
+1. **Todas** las subcarpetas de `/Users/alex/Nube /repos/` que contienen un
+   `.git` (no hay una lista fija: cualquier repo nuevo que se ponga ahí se
+   incluye automáticamente).
+2. Las rutas absolutas listadas en `extra_repos.txt` (una por línea, líneas
+   que empiezan con `#` se ignoran) — para repos fuera de esa carpeta.
+   Instalado en `/Users/alex/scripts/extra_repos.txt`.
 
 ## Qué hace
 
-1. Recorre **todas** las subcarpetas de `/Users/alex/Nube /repos/` que contienen un
-   `.git` (no hay una lista fija de repos: cualquier repo nuevo que se ponga ahí
-   se incluye automáticamente).
-2. Para cada repo, hace `git fetch` y compara `HEAD` contra su upstream
-   (`@{u}`) con `git rev-list --count HEAD..@{u}`.
-3. Si algún repo tiene commits pendientes de traer, arma la lista de repos
-   desactualizados y dispara una notificación de macOS (con sonido) que
-   muestra, en líneas separadas, cada repo con la cantidad de commits detrás
-   y su rama upstream. Además deja un registro en el log.
-4. Si todos los repos están al día, solo escribe una línea en el log (sin
-   notificación).
+Para cada repo:
+
+1. Hace `git fetch` y compara `HEAD` contra su upstream (`@{u}`) con
+   `git rev-list --count HEAD..@{u}`. Si el fetch falla (por ejemplo, un
+   remoto en un disco externo que no está conectado), solo se registra el
+   error en el log — no genera notificación falsa.
+2. Corre `git status --porcelain` para detectar cambios sin commitear
+   (staged, modificados o sin trackear), sin depender de que el fetch haya
+   funcionado.
+
+Si algún repo quedó desactualizado y/o con cambios sin commitear, dispara una
+notificación de macOS (con sonido) que lista, en líneas separadas, cada caso.
+Además deja un registro en el log. Si todo está en orden, solo escribe una
+línea en el log (sin notificación).
 
 ## Archivos
 
 - `check_git_repos.sh` — el script (instalado en `/Users/alex/scripts/check_git_repos.sh`).
+- `extra_repos.txt` — lista de repos adicionales a vigilar (instalado en
+  `/Users/alex/scripts/extra_repos.txt`). Actualmente incluye `/Users/alex/Nube /nube`
+  (sus remotos están en discos externos, así que el chequeo de "atrás del
+  remoto" solo funciona cuando el disco está montado).
 - `com.alex.checkgitrepos.plist` — LaunchAgent de macOS que ejecuta el script
   cada hora (instalado en `~/Library/LaunchAgents/com.alex.checkgitrepos.plist`).
 

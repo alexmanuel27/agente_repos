@@ -1,0 +1,6 @@
+# Rutas absolutas de repos adicionales a vigilar, una por línea.
+# Líneas que empiezan con # se ignoran.
+# Ejemplo:
+# /Users/alex/otra_carpeta/mi-repo
+
+/Users/alex/Nube /nube
