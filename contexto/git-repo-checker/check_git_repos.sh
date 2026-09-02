@@ -9,6 +9,7 @@
 REPOS_DIR="/Users/alex/Nube /repos"
 EXTRA_REPOS_FILE="/Users/alex/scripts/extra_repos.txt"
 LOG_FILE="/Users/alex/scripts/logs/check_git_repos.log"
+STATE_FILE="/Users/alex/scripts/last_check_state.txt"
 GIT_BIN="$(command -v git)"
 
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
@@ -48,8 +49,10 @@ for dir in "${repos[@]}"; do
         fi
     fi
 
-    if [ -n "$("$GIT_BIN" -C "$dir" status --porcelain 2>/dev/null)" ]; then
-        dirty+=("$name")
+    status_output="$("$GIT_BIN" -C "$dir" status --porcelain 2>/dev/null)"
+    if [ -n "$status_output" ]; then
+        n_changes="$(echo "$status_output" | wc -l | tr -d ' ')"
+        dirty+=("$name ($n_changes archivo(s) sin commitear)")
     fi
 done
 
@@ -73,13 +76,23 @@ if [ ${#notif_lines[@]} -gt 0 ]; then
     notif_body="${notif_body%$'\n'}"
     notif_title="Git: repos con pendientes de revisión"
 
+    echo "$notif_body" > "$STATE_FILE"
+
+    # Notificación (banner con sonido) + ventana flotante con el detalle.
     osascript - "$notif_title" "$notif_body" <<'APPLESCRIPT' >/dev/null 2>&1
 on run argv
     display notification (item 2 of argv) with title (item 1 of argv) sound name "Ping"
 end run
 APPLESCRIPT
+
+    osascript - "$notif_title" "$notif_body" <<'APPLESCRIPT' >/dev/null 2>&1
+on run argv
+    display dialog (item 2 of argv) with title (item 1 of argv) buttons {"OK"} default button 1 with icon note
+end run
+APPLESCRIPT
 else
     echo "[$ts] Todos los repos están actualizados y sin cambios pendientes." >> "$LOG_FILE"
+    rm -f "$STATE_FILE"
 fi
 
 if [ ${#errors[@]} -gt 0 ]; then

@@ -25,14 +25,31 @@ Para cada repo:
    (staged, modificados o sin trackear), sin depender de que el fetch haya
    funcionado.
 
-Si algún repo quedó desactualizado y/o con cambios sin commitear, dispara una
-notificación de macOS (con sonido) que lista, en líneas separadas, cada caso.
+Si algún repo quedó desactualizado y/o con cambios sin commitear:
+
+1. Dispara una notificación de macOS (banner con sonido).
+2. Guarda el detalle en `STATE_FILE` (`/Users/alex/scripts/last_check_state.txt`).
+3. Muestra automáticamente una ventana flotante (`display dialog`) con el
+   detalle completo, repo por repo: cuántos commits detrás está y/o cuántos
+   archivos tiene sin commitear. La ventana se queda en pantalla hasta que
+   se le da OK.
+
+No se usa un banner "clickeable" con acción — se probó con `terminal-notifier`,
+pero macOS bloquea (o cuelga) las solicitudes de permiso de notificación de
+apps sin firma de Apple válida en versiones recientes del sistema, así que no
+es viable de forma confiable. Por eso la ventana se abre directo en vez de
+depender de que el usuario toque la notificación.
+
 Además deja un registro en el log. Si todo está en orden, solo escribe una
-línea en el log (sin notificación).
+línea en el log (sin notificación ni ventana), y borra el `STATE_FILE`.
 
 ## Archivos
 
-- `check_git_repos.sh` — el script (instalado en `/Users/alex/scripts/check_git_repos.sh`).
+- `check_git_repos.sh` — el script principal (instalado en
+  `/Users/alex/scripts/check_git_repos.sh`).
+- `show_pending_repos.sh` — vuelve a mostrar la ventana con el último
+  detalle guardado en `STATE_FILE`, para consultarlo manualmente en
+  cualquier momento (instalado en `/Users/alex/scripts/show_pending_repos.sh`).
 - `extra_repos.txt` — lista de repos adicionales a vigilar (instalado en
   `/Users/alex/scripts/extra_repos.txt`). Actualmente incluye `/Users/alex/Nube /nube`
   (sus remotos están en discos externos, así que el chequeo de "atrás del
@@ -74,6 +91,12 @@ Correrlo manualmente (sin esperar a la hora):
 
 ```bash
 /Users/alex/scripts/check_git_repos.sh
+```
+
+Volver a ver el detalle de la última corrida sin re-chequear nada:
+
+```bash
+/Users/alex/scripts/show_pending_repos.sh
 ```
 
 ## Notas
