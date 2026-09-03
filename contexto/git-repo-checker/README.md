@@ -40,13 +40,56 @@ apps sin firma de Apple válida en versiones recientes del sistema, así que no
 es viable de forma confiable. Por eso la ventana se abre directo en vez de
 depender de que el usuario toque la notificación.
 
+Si hay repos con **cambios sin commitear**, la ventana flotante tiene un botón
+extra "Revisar y commitear" que lanza `review_and_commit.sh` (ver abajo).
+
 Además deja un registro en el log. Si todo está en orden, solo escribe una
 línea en el log (sin notificación ni ventana), y borra el `STATE_FILE`.
+
+## Revisión interactiva: add, commit firmado y push (`review_and_commit.sh`)
+
+Recorre los repos con cambios sin commitear y, uno por uno, muestra una
+ventana con: rama actual, lista de archivos cambiados (hasta 20, con conteo
+del resto) y un campo de texto para el mensaje de commit — **pre-llenado con
+una sugerencia** generada a partir de los archivos cambiados (lista los
+nombres si son ≤3, o las carpetas de nivel superior si son más). Botones:
+
+- **Omitir** — no toca el repo, sigue con el siguiente.
+- **Commit** — `git add -A` + `git commit -S` (firmado, ver abajo).
+- **Commit + Push** — lo anterior + `git push`.
+
+Antes de tocar el repo, revisa los nombres de los archivos cambiados contra
+una lista de patrones de posibles secretos (`.env`, `*.pem`, `*.key`,
+`id_rsa*`, `*credentials*.json`, etc.). Si encuentra alguno, muestra una
+alerta con la lista y obliga a elegir explícitamente "Continuar" antes de
+seguir — por defecto omite el repo.
+
+### Firma de commits (SSH)
+
+Los commits se firman con `git commit -S`, usando la llave SSH ya configurada
+globalmente para esto:
+
+```bash
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+```
+
+(`commit.gpgsign` se deja sin activar a propósito, para no firmar automáticamente
+los commits que hagas por fuera de este flujo.) Para que GitHub marque estos
+commits como **"Verified"**, hay que agregar esa misma llave pública como
+**Signing Key** (no "Authentication Key") en
+[github.com/settings/keys](https://github.com/settings/keys) — paso manual,
+no lo puede hacer el agente.
 
 ## Archivos
 
 - `check_git_repos.sh` — el script principal (instalado en
   `/Users/alex/scripts/check_git_repos.sh`).
+- `review_and_commit.sh` — el flujo interactivo de add/commit/push
+  (instalado en `/Users/alex/scripts/review_and_commit.sh`).
+- `lib_discover_repos.sh` — función compartida `discover_repos()` que
+  arma la lista de repos vigilados (instalado en
+  `/Users/alex/scripts/lib_discover_repos.sh`).
 - `show_pending_repos.sh` — vuelve a mostrar la ventana con el último
   detalle guardado en `STATE_FILE`, para consultarlo manualmente en
   cualquier momento (instalado en `/Users/alex/scripts/show_pending_repos.sh`).
@@ -97,6 +140,13 @@ Volver a ver el detalle de la última corrida sin re-chequear nada:
 
 ```bash
 /Users/alex/scripts/show_pending_repos.sh
+```
+
+Lanzar la revisión interactiva (add/commit/push) directamente, sin pasar por
+la notificación:
+
+```bash
+/Users/alex/scripts/review_and_commit.sh
 ```
 
 ## Notas
