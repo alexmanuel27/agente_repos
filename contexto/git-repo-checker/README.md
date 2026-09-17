@@ -4,6 +4,23 @@ Agente que revisa cada hora si alguno de los repos vigilados está desactualizad
 respecto a su remoto y/o tiene cambios sin commitear, y avisa con una
 notificación nativa de macOS.
 
+## RepoWatch (app de barra de menús)
+
+`RepoWatchApp/` es una app SwiftUI mínima (un solo archivo, sin Xcode) que
+pone un ícono en la barra de menús con el mismo estado que `STATE_FILE`, y
+botones para "Revisar y commitear…", "Revisar ahora" y "Ver log" — solo
+llama a los scripts de abajo, no reimplementa nada. Instalada en
+`/Users/alex/Applications/RepoWatch.app` y agregada a los ítems de inicio de
+sesión. Para reconstruirla tras editar `main.swift` o `gen_icon.swift`:
+
+```bash
+/Users/alex/scripts/GitRepoCheckerApp/build.sh
+```
+
+No está (ni tiene sentido que esté) en la App Store: usa `Process`/`bash`
+para correr los scripts y tiene rutas personales hardcodeadas — el sandbox de
+la App Store bloquea justo eso, y no es un producto multiusuario.
+
 ## Qué repos vigila
 
 1. **Todas** las subcarpetas de `/Users/alex/Nube /repos/` que contienen un
