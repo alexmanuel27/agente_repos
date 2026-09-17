@@ -183,6 +183,9 @@ APPLESCRIPT
 else
     echo "[$ts] Todos los repos están actualizados y sin cambios pendientes." >> "$LOG_FILE"
     rm -f "$STATE_FILE"
+    # "Revisar ahora" manual sí quiere confirmación aunque no haya nada —
+    # si no, un clic sin pendientes se siente como si no hubiera pasado nada.
+    [ "$1" = "--manual" ] && echo "Todo al día ✅ — sin pendientes." > "$PENDING_NOTIF_FILE"
 fi
 
 if [ ${#autosynced[@]} -gt 0 ]; then

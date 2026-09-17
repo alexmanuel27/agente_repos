@@ -186,7 +186,7 @@ struct GitRepoCheckerApp: App {
             Button("Revisar y commitear…") { runScript("review_and_commit.sh") }
                 .disabled(!model.isPending)
             Button("Revisar ahora") {
-                runScript("check_git_repos.sh")
+                runScript("check_git_repos.sh", args: ["--manual"])
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5) { model.refresh() }
             }
             Button("Pushear pendientes") { runScript("push_pending.sh") }

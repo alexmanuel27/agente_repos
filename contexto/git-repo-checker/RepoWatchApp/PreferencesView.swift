@@ -151,7 +151,7 @@ struct PreferencesView: View {
                     .onChange(of: intervalMinutes) { _, _ in save() }
             }
             Button {
-                runScript("check_git_repos.sh")
+                runScript("check_git_repos.sh", args: ["--manual"])
             } label: {
                 Label("Revisar ahora", systemImage: "arrow.clockwise")
             }
