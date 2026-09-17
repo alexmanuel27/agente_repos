@@ -1,17 +1,32 @@
 #!/bin/bash
-# Recorre los repos vigilados y, para cada uno con cambios sin commitear,
-# muestra una ventana con el detalle + un campo para el mensaje de commit.
-# Según el botón:
+# Recorre los repos vigilados en modo revisión (los de modo autosync ya se
+# manejan solos en check_git_repos.sh) y, para cada uno con cambios sin
+# commitear, muestra una ventana con el detalle + un campo para el mensaje
+# de commit. Según el botón:
 #   - Omitir: no toca el repo.
-#   - Commit: git add -A + git commit (firmado con SSH si está activado en
-#     Preferencias, vía -c gpg.format=ssh -c user.signingkey=... — no toca
-#     la config global de git).
-#   - Commit + Push: lo anterior + push al primer remoto que responda.
+#   - Commit: git add (-A o -u según el override "stage") + git commit
+#     (firmado con SSH si está activado, global o por repo), vía
+#     -c gpg.format=ssh -c user.signingkey=... — no toca la config global.
+#   - Commit + Push: lo anterior + push al primer remoto que responda
+#     (salvo que el override "push" del repo sea "never").
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib_discover_repos.sh"
 source "$SCRIPT_DIR/lib_settings.sh"
+source "$SCRIPT_DIR/lib_repo_config.sh"
+source "$SCRIPT_DIR/lib_commit_safety.sh"
 load_settings
+
+# Evita dos revisiones a la vez (ej. clic manual mientras corre otra).
+LOCK_DIR="$CONFIG_DIR/.review.lock"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    osascript -e 'display notification "Ya hay una revisión en curso." with title "RepoWatch"' >/dev/null 2>&1
+    exit 0
+fi
+trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
+
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND='ssh -oBatchMode=yes -oConnectTimeout=10'
 
 GIT_BIN="$(command -v git)"
 LOG_FILE="$CONFIG_DIR/logs/check_git_repos.log"
@@ -27,55 +42,24 @@ end run
 APPLESCRIPT
 }
 
-# Nombres de archivo que podrían contener secretos. Coincide contra el
-# basename de cada archivo con cambios, antes de hacer `git add -A`.
-SENSITIVE_PATTERNS=(
-    ".env" ".env.*" "*.pem" "*.key" "*.p12" "*.pfx" "*.keystore" "*.ppk"
-    "id_rsa" "id_rsa.*" "id_ed25519" "id_ed25519.*" "id_ecdsa" "id_ecdsa.*"
-    "*credentials*.json" "*credentials*.yml" "*credentials*.yaml"
-    "*secrets*.json" "*secrets*.yml" "*secrets*.yaml" "*.asc"
-)
-
-find_sensitive_files() {
-    local status="$1"
-    local line path base pat
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        path="${line:3}"
-        path="${path#* -> }"
-        base="$(basename "$path")"
-        for pat in "${SENSITIVE_PATTERNS[@]}"; do
-            case "$base" in
-                $pat) printf '%s\n' "$path"; break ;;
-            esac
-        done
-    done <<< "$status"
-}
-
-# Sugiere un mensaje de commit a partir de los archivos cambiados: lista los
-# nombres si son pocos, o las carpetas de nivel superior si son muchos.
-suggest_commit_message() {
-    local status="$1" n_lines="$2"
-    local files dirs
-    if [ "$n_lines" -le 3 ]; then
-        files="$(printf '%s\n' "$status" | cut -c4- | sed 's/ -> .*//' | paste -sd ',' - | sed 's/,/, /g')"
-        echo "Update $files"
-    else
-        dirs="$(printf '%s\n' "$status" | cut -c4- | sed 's/ -> .*//' | awk -F/ 'NF>1{print $1} NF==1{print "raíz"}' | sort -u | paste -sd ',' - | sed 's/,/, /g')"
-        echo "Update $n_lines files ($dirs)"
-    fi
-}
-
 repos=()
 while IFS= read -r repo_path; do
     repos+=("$repo_path")
-done < <(discover_repos)
+done < <(discover_repos | awk '!seen[$0]++')
 
 any_reviewed=0
 
 for dir in "${repos[@]}"; do
     name="$(basename "$dir")"
-    status_short="$("$GIT_BIN" -C "$dir" status --short 2>/dev/null)"
+
+    [ "$(repo_get "$dir" enabled true)" = "false" ] && continue
+    [ "$(repo_get "$dir" mode review)" = "autosync" ] && continue
+
+    if [ "$(repo_get "$dir" untracked include)" = "ignore" ]; then
+        status_short="$("$GIT_BIN" -C "$dir" status --short -uno 2>/dev/null)"
+    else
+        status_short="$("$GIT_BIN" -C "$dir" status --short --untracked-files=all 2>/dev/null)"
+    fi
     [ -z "$status_short" ] && continue
 
     any_reviewed=1
@@ -105,7 +89,23 @@ APPLESCRIPT
         fi
     fi
 
+    large_hits="$(find_large_files "$status_short" "$dir")"
+    if [ -n "$large_hits" ]; then
+        warn_choice="$(osascript - "$name" "$large_hits" <<'APPLESCRIPT' 2>/dev/null
+on run argv
+    set theResult to display alert ("⚠️ Archivo(s) grande(s) en " & (item 1 of argv)) message ("Pesan más de 100MB — probablemente no deberían ir a git:" & return & return & (item 2 of argv) & return & return & "¿Continuar de todas formas?") buttons {"Omitir repo", "Continuar"} default button "Omitir repo"
+    return button returned of theResult
+end run
+APPLESCRIPT
+)"
+        if [ "$warn_choice" != "Continuar" ]; then
+            echo "[$ts] $name: omitido por archivo(s) grande(s) ($(echo "$large_hits" | tr '\n' ' '))" >> "$LOG_FILE"
+            continue
+        fi
+    fi
+
     suggested_message="$(suggest_commit_message "$status_short" "$n_lines")"
+    push_mode="$(repo_get "$dir" push ask)"
 
     prompt="Rama: $branch
 
@@ -114,13 +114,23 @@ $display_status
 
 Mensaje de commit:"
 
-    dialog_out="$(osascript - "$prompt" "Revisar: $name" "$suggested_message" <<'APPLESCRIPT' 2>/dev/null
+    if [ "$push_mode" = "never" ]; then
+        dialog_out="$(osascript - "$prompt" "Revisar: $name" "$suggested_message" <<'APPLESCRIPT' 2>/dev/null
 on run argv
-    set theResult to display dialog (item 1 of argv) default answer (item 3 of argv) with title (item 2 of argv) buttons {"Omitir", "Commit", "Commit + Push"} default button "Commit" cancel button "Omitir" with icon note
+    set theResult to display dialog (item 1 of argv) default answer (item 3 of argv) with title (item 2 of argv) buttons {"Omitir", "Commit"} default button "Commit" cancel button "Omitir" giving up after 900 with icon note
     return (button returned of theResult) & "|||" & (text returned of theResult)
 end run
 APPLESCRIPT
 )"
+    else
+        dialog_out="$(osascript - "$prompt" "Revisar: $name" "$suggested_message" <<'APPLESCRIPT' 2>/dev/null
+on run argv
+    set theResult to display dialog (item 1 of argv) default answer (item 3 of argv) with title (item 2 of argv) buttons {"Omitir", "Commit", "Commit + Push"} default button "Commit" cancel button "Omitir" giving up after 900 with icon note
+    return (button returned of theResult) & "|||" & (text returned of theResult)
+end run
+APPLESCRIPT
+)"
+    fi
     status=$?
 
     if [ $status -ne 0 ]; then
@@ -132,28 +142,43 @@ APPLESCRIPT
     message="${dialog_out#*|||}"
     [ -z "$message" ] && message="Update $name"
 
-    if ! "$GIT_BIN" -C "$dir" add -A 2>/tmp/git_review_err; then
+    # Para poder deshacer el add si el commit falla: solo si el índice
+    # estaba limpio antes de tocarlo (si ya había algo stageado a mano, no
+    # lo pisamos).
+    was_index_clean=1
+    "$GIT_BIN" -C "$dir" diff --cached --quiet 2>/dev/null || was_index_clean=0
+
+    stage_mode="$(repo_get "$dir" stage all)"
+    if [ "$stage_mode" = "tracked" ]; then
+        add_ok=1; "$GIT_BIN" -C "$dir" add -u 2>/tmp/git_review_err || add_ok=0
+    else
+        add_ok=1; "$GIT_BIN" -C "$dir" add -A 2>/tmp/git_review_err || add_ok=0
+    fi
+    if [ "$add_ok" -ne 1 ]; then
         show_alert "Error en $name" "git add falló: $(tail -n1 /tmp/git_review_err)"
         echo "[$ts] $name: git add falló" >> "$LOG_FILE"
         continue
     fi
 
+    sign_mode="$(repo_get "$dir" sign "$SIGN_COMMITS")"
+    signing_key="$(repo_get "$dir" signing_key "$SIGNING_KEY")"
     commit_ok=1
-    if [ "$SIGN_COMMITS" = "true" ] && [ -n "$SIGNING_KEY" ]; then
-        "$GIT_BIN" -C "$dir" -c gpg.format=ssh -c "user.signingkey=$SIGNING_KEY" commit -S -m "$message" 2>/tmp/git_review_err || commit_ok=0
+    if [ "$sign_mode" = "true" ] && [ -n "$signing_key" ]; then
+        "$GIT_BIN" -C "$dir" -c gpg.format=ssh -c "user.signingkey=$signing_key" commit -S -m "$message" 2>/tmp/git_review_err || commit_ok=0
     else
         "$GIT_BIN" -C "$dir" commit -m "$message" 2>/tmp/git_review_err || commit_ok=0
     fi
     if [ "$commit_ok" -ne 1 ]; then
         show_alert "Error en $name" "git commit falló: $(tail -n1 /tmp/git_review_err)"
         echo "[$ts] $name: git commit falló" >> "$LOG_FILE"
+        if [ "$was_index_clean" -eq 1 ]; then
+            "$GIT_BIN" -C "$dir" reset >/dev/null 2>&1
+        fi
         continue
     fi
     echo "[$ts] $name: commit creado (\"$message\")" >> "$LOG_FILE"
 
     if [ "$button" = "Commit + Push" ]; then
-        # Repos con varios remotos (ej. bare repo en disco externo que va y
-        # viene) → usa el primero que responda, no siempre "origin".
         push_remote=""
         for r in $("$GIT_BIN" -C "$dir" remote); do
             if "$GIT_BIN" -C "$dir" ls-remote --exit-code "$r" >/dev/null 2>&1; then

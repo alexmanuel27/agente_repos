@@ -31,12 +31,15 @@ struct PreferencesView: View {
     @State private var intervalMinutes: Double
     @State private var signCommits: Bool
     @State private var signingKey: String
+    @State private var autosyncRepos: Set<String>
 
     init() {
         let settings = RepoWatchConfig.readSettings()
         _intervalMinutes = State(initialValue: Double(settings["interval_minutes"] ?? "60") ?? 60)
         _signCommits = State(initialValue: settings["sign_commits"] == "true")
         _signingKey = State(initialValue: settings["signing_key"] ?? "")
+        let synced = RepoWatchConfig.readOverrides().filter { $0.value["mode"] == "autosync" }.keys
+        _autosyncRepos = State(initialValue: Set(synced))
     }
 
     var body: some View {
@@ -119,8 +122,8 @@ struct PreferencesView: View {
     }
 
     private var reposCard: some View {
-        card(title: "Repos individuales", subtitle: "Rutas sueltas, para repos fuera de las carpetas vigiladas.") {
-            pathList(repos, icon: "arrow.triangle.branch") { path in
+        card(title: "Repos individuales", subtitle: "Rutas sueltas, para repos fuera de las carpetas vigiladas. \"Sync\" = commit y push automáticos, sin preguntar, para carpetas de sincronización en vez de proyectos.") {
+            pathList(repos, icon: "arrow.triangle.branch", showSyncToggle: true) { path in
                 repos.removeAll { $0 == path }; save()
             }
             addButton("Agregar repo…") { addRepo() }
@@ -195,7 +198,10 @@ struct PreferencesView: View {
     }
 
     @ViewBuilder
-    private func pathList(_ paths: [String], icon: String, onRemove: @escaping (String) -> Void) -> some View {
+    private func pathList(
+        _ paths: [String], icon: String, showSyncToggle: Bool = false,
+        onRemove: @escaping (String) -> Void
+    ) -> some View {
         if paths.isEmpty {
             Label("Ninguna todavía", systemImage: "tray")
                 .foregroundStyle(.secondary)
@@ -210,6 +216,9 @@ struct PreferencesView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Spacer()
+                        if showSyncToggle {
+                            syncModeMenu(for: path)
+                        }
                         Button(action: { withAnimation(.easeInOut(duration: 0.18)) { onRemove(path) } }) {
                             Image(systemName: "trash").foregroundStyle(.secondary)
                         }
@@ -222,6 +231,28 @@ struct PreferencesView: View {
                 }
             }
         }
+    }
+
+    private func syncModeMenu(for path: String) -> some View {
+        let isSync = autosyncRepos.contains(path)
+        return Menu {
+            Button("Proyecto (revisar antes de commitear)") { setSyncMode(path, autosync: false) }
+            Button("Carpeta de sincronización (commit + push automático)") { setSyncMode(path, autosync: true) }
+        } label: {
+            Text(isSync ? "Sync" : "Proyecto")
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(isSync ? brandPurple.opacity(0.2) : Color.primary.opacity(0.08)))
+                .foregroundStyle(isSync ? brandPurple : .secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private func setSyncMode(_ path: String, autosync: Bool) {
+        RepoWatchConfig.setSyncPreset(path, autosync: autosync)
+        if autosync { autosyncRepos.insert(path) } else { autosyncRepos.remove(path) }
     }
 
     private func addButton(_ title: String, action: @escaping () -> Void) -> some View {

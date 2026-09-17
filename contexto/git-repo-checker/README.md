@@ -45,8 +45,31 @@ Todo editable en la UI, sin tocar archivos a mano:
   del usuario.
 
 Los datos por usuario quedan en `~/Library/Application Support/RepoWatch/`:
-`watch_folders.txt`, `repos.txt`, `settings.txt`, `last_check_state.txt` y
-`logs/check_git_repos.log`.
+`watch_folders.txt`, `repos.txt`, `settings.txt`, `repo_overrides.txt`,
+`last_check_state.txt`, `last_check.txt` (timestamp de la última corrida,
+se muestra como "hace N min" en el menú) y `logs/check_git_repos.log`.
+
+### Configuración por repo (`repo_overrides.txt`)
+
+Un repo no tiene por qué comportarse como un proyecto normal de GitHub —
+por ejemplo uno que es en realidad una carpeta de sincronización personal,
+con remotos en discos externos que a veces no están conectados. Para esos
+casos, en **Repos individuales** cada fila tiene un botón que alterna entre:
+
+- **Proyecto** (default): revisión normal, diálogo por commit.
+- **Sync**: `mode=autosync` — commitea y pushea solo, sin diálogo, cada vez
+  que hay cambios. Antes de tocar el repo corre las mismas guardas de
+  seguridad que el flujo interactivo (archivos sensibles, archivos > 100MB,
+  merge/rebase en curso, HEAD separado, `user.email`/`user.name` sin
+  configurar) — si alguna salta, cae al flujo normal en vez de commitear
+  a ciegas.
+
+El archivo es texto plano, `ruta TAB clave TAB valor`, una línea por
+override (última línea gana). Claves: `enabled`, `mode`, `stage`
+(`all`/`tracked`, o sea `git add -A` vs `-u`), `untracked`
+(`include`/`ignore`), `sign`, `push` (`ask`/`auto`/`never`). Se resuelven
+con `repo_get()` en `lib_repo_config.sh`, compartida por
+`check_git_repos.sh` y `review_and_commit.sh`.
 
 ## Qué hace, repo por repo
 
@@ -76,10 +99,12 @@ RepoWatchApp/
   Info.plist
   build.sh
   Resources/scripts/
-    check_git_repos.sh     # revisión periódica → notificación + ventana
+    check_git_repos.sh     # revisión periódica → notificación + ventana; corre autosync
     review_and_commit.sh   # flujo interactivo add/commit firmado/push
     lib_discover_repos.sh  # arma la lista de repos desde la config del usuario
     lib_settings.sh        # lee horario/firma desde settings.txt
+    lib_repo_config.sh     # repo_get(): overrides por repo (repo_overrides.txt)
+    lib_commit_safety.sh   # escaneo de sensibles/archivos grandes, autosync_commit()
 ```
 
 Los `.sh` quedan empacados en `Contents/Resources/scripts/` dentro del
