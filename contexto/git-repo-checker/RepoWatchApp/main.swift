@@ -58,7 +58,7 @@ let scheduler = Scheduler()
 @main
 struct GitRepoCheckerApp: App {
     @StateObject private var model = StatusModel()
-    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some Scene {
         MenuBarExtra {
@@ -79,7 +79,7 @@ struct GitRepoCheckerApp: App {
 
             Button("Preferencias…") {
                 NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: "preferences")
+                openSettings()
             }
             Button("Salir") { NSApplication.shared.terminate(nil) }
         } label: {
@@ -95,7 +95,7 @@ struct GitRepoCheckerApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        Window("RepoWatch — Preferencias", id: "preferences") {
+        Settings {
             PreferencesView()
         }
         .windowResizability(.contentSize)
