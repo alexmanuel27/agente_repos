@@ -80,13 +80,21 @@ struct GitRepoCheckerApp: App {
 
             Divider()
 
-            Button("Preferencias…") { openWindow(id: "preferences") }
+            Button("Preferencias…") {
+                // Apps de barra de menús (LSUIElement) no activan su ventana
+                // sola con openWindow: hay que pasar a política normal y
+                // forzar la activación, si no la ventana queda detrás.
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "preferences")
+            }
             Button("Salir") { NSApplication.shared.terminate(nil) }
         }
         .menuBarExtraStyle(.menu)
 
         Window("RepoWatch — Preferencias", id: "preferences") {
             PreferencesView()
+                .onDisappear { NSApp.setActivationPolicy(.accessory) }
         }
         .windowResizability(.contentSize)
     }

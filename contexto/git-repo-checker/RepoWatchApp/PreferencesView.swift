@@ -16,58 +16,118 @@ struct PreferencesView: View {
     }
 
     var body: some View {
-        Form {
-            Section("Carpetas vigiladas (se revisa cada repo adentro)") {
-                pathList(watchFolders) { idx in
-                    watchFolders.remove(at: idx); save()
-                }
-                Button("Agregar carpeta…") { addFolder() }
-            }
+        VStack(spacing: 0) {
+            header
 
-            Section("Repos individuales") {
-                pathList(repos) { idx in
-                    repos.remove(at: idx); save()
-                }
-                Button("Agregar repo…") { addRepo() }
-            }
-
-            Section("Horario") {
-                Stepper("Revisar cada \(Int(intervalMinutes)) min",
-                        value: $intervalMinutes, in: 15...1440, step: 15)
-                    .onChange(of: intervalMinutes) { _, _ in save() }
-            }
-
-            Section("Firma de commits (SSH)") {
-                Toggle("Firmar al hacer Commit / Commit + Push", isOn: $signCommits)
-                    .onChange(of: signCommits) { _, _ in save() }
-                if signCommits {
-                    HStack {
-                        Text(signingKey.isEmpty ? "(sin llave elegida)" : signingKey)
-                            .font(.system(size: 11))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer()
-                        Button("Elegir…") { chooseSigningKey() }
+            Form {
+                Section {
+                    pathList(watchFolders, icon: "folder.fill") { idx in
+                        watchFolders.remove(at: idx); save()
                     }
+                    Button { addFolder() } label: {
+                        Label("Agregar carpeta…", systemImage: "plus")
+                    }
+                } header: {
+                    Label("Carpetas vigiladas", systemImage: "folder")
+                } footer: {
+                    Text("Se revisa cada repo que haya directamente adentro.")
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    pathList(repos, icon: "arrow.triangle.branch") { idx in
+                        repos.remove(at: idx); save()
+                    }
+                    Button { addRepo() } label: {
+                        Label("Agregar repo…", systemImage: "plus")
+                    }
+                } header: {
+                    Label("Repos individuales", systemImage: "shippingbox")
+                }
+
+                Section {
+                    HStack {
+                        Label("Revisar cada", systemImage: "clock")
+                        Spacer()
+                        Text("\(Int(intervalMinutes)) min")
+                            .font(.system(.body, design: .monospaced).bold())
+                            .foregroundStyle(.tint)
+                        Stepper("", value: $intervalMinutes, in: 15...1440, step: 15)
+                            .labelsHidden()
+                            .onChange(of: intervalMinutes) { _, _ in save() }
+                    }
+                } header: {
+                    Label("Horario", systemImage: "timer")
+                }
+
+                Section {
+                    Toggle(isOn: $signCommits) {
+                        Label("Firmar commits con SSH", systemImage: "checkmark.seal")
+                    }
+                    .onChange(of: signCommits) { _, _ in save() }
+
+                    if signCommits {
+                        HStack {
+                            Image(systemName: "key.fill")
+                                .foregroundStyle(.secondary)
+                            Text(signingKey.isEmpty ? "Sin llave elegida" : (signingKey as NSString).lastPathComponent)
+                                .font(.system(size: 12))
+                                .foregroundStyle(signingKey.isEmpty ? .secondary : .primary)
+                            Spacer()
+                            Button("Elegir…") { chooseSigningKey() }
+                        }
+                    }
+                } header: {
+                    Label("Firma de commits", systemImage: "signature")
+                } footer: {
+                    Text("Se aplica solo al hacer Commit / Commit + Push desde el menú, sin tocar la configuración global de git.")
+                        .foregroundStyle(.secondary)
                 }
             }
+            .formStyle(.grouped)
+        }
+        .frame(width: 520, height: 560)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 40, height: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("RepoWatch")
+                    .font(.title2.bold())
+                Text("Vigilante de repos git")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
         }
         .padding(20)
-        .frame(width: 480)
     }
 
     @ViewBuilder
-    private func pathList(_ paths: [String], onRemove: @escaping (Int) -> Void) -> some View {
+    private func pathList(_ paths: [String], icon: String, onRemove: @escaping (Int) -> Void) -> some View {
         if paths.isEmpty {
-            Text("(ninguna)").foregroundStyle(.secondary).font(.system(size: 11))
+            Label("Ninguna todavía", systemImage: "tray")
+                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
         } else {
             ForEach(Array(paths.enumerated()), id: \.offset) { idx, path in
                 HStack {
-                    Text(path).font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
+                    Image(systemName: icon)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+                    Text(path)
+                        .font(.system(size: 12, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     Spacer()
                     Button(action: { onRemove(idx) }) {
-                        Image(systemName: "minus.circle")
-                    }.buttonStyle(.borderless)
+                        Image(systemName: "trash")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
         }
