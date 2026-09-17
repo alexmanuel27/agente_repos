@@ -45,19 +45,24 @@ struct PreferencesView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    switch selection {
-                    case .folders: foldersCard
-                    case .repos: reposCard
-                    case .schedule: scheduleCard
-                    case .signing: signingCard
+                    Group {
+                        switch selection {
+                        case .folders: foldersCard
+                        case .repos: reposCard
+                        case .schedule: scheduleCard
+                        case .signing: signingCard
+                        }
                     }
+                    .id(selection)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .animation(.easeInOut(duration: 0.22), value: selection)
         }
         .frame(width: 660, height: 480)
+        .background(.regularMaterial)
     }
 
     // MARK: Sidebar
@@ -74,7 +79,9 @@ struct PreferencesView: View {
             .padding(16)
 
             ForEach(PrefSection.allCases) { section in
-                Button { selection = section } label: {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) { selection = section }
+                } label: {
                     HStack(spacing: 10) {
                         Image(systemName: section.icon)
                             .frame(width: 18)
@@ -85,7 +92,7 @@ struct PreferencesView: View {
                     .padding(.vertical, 9)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(selection == section ? brandPurple.opacity(0.16) : .clear)
+                            .fill(selection == section ? brandPurple.opacity(0.18) : .clear)
                     )
                     .foregroundStyle(selection == section ? brandPurple : Color.primary)
                     .contentShape(Rectangle())
@@ -97,15 +104,15 @@ struct PreferencesView: View {
             Spacer()
         }
         .frame(width: 200)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(.ultraThinMaterial)
     }
 
     // MARK: Cards
 
     private var foldersCard: some View {
         card(title: "Carpetas vigiladas", subtitle: "Se revisa cada repo que haya directamente adentro.") {
-            pathList(watchFolders, icon: "folder.fill") { idx in
-                watchFolders.remove(at: idx); save()
+            pathList(watchFolders, icon: "folder.fill") { path in
+                watchFolders.removeAll { $0 == path }; save()
             }
             addButton("Agregar carpeta…") { addFolder() }
         }
@@ -113,8 +120,8 @@ struct PreferencesView: View {
 
     private var reposCard: some View {
         card(title: "Repos individuales", subtitle: "Rutas sueltas, para repos fuera de las carpetas vigiladas.") {
-            pathList(repos, icon: "arrow.triangle.branch") { idx in
-                repos.remove(at: idx); save()
+            pathList(repos, icon: "arrow.triangle.branch") { path in
+                repos.removeAll { $0 == path }; save()
             }
             addButton("Agregar repo…") { addRepo() }
         }
@@ -175,19 +182,20 @@ struct PreferencesView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .textBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.06)))
+        .background(RoundedRectangle(cornerRadius: 14).fill(.thinMaterial))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.08)))
+        .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
     }
 
     @ViewBuilder
-    private func pathList(_ paths: [String], icon: String, onRemove: @escaping (Int) -> Void) -> some View {
+    private func pathList(_ paths: [String], icon: String, onRemove: @escaping (String) -> Void) -> some View {
         if paths.isEmpty {
             Label("Ninguna todavía", systemImage: "tray")
                 .foregroundStyle(.secondary)
                 .font(.system(size: 12))
         } else {
             VStack(spacing: 6) {
-                ForEach(Array(paths.enumerated()), id: \.offset) { idx, path in
+                ForEach(paths, id: \.self) { path in
                     HStack {
                         Image(systemName: icon).foregroundStyle(brandPurple).frame(width: 16)
                         Text(path)
@@ -195,14 +203,15 @@ struct PreferencesView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Spacer()
-                        Button(action: { onRemove(idx) }) {
+                        Button(action: { withAnimation(.easeInOut(duration: 0.18)) { onRemove(path) } }) {
                             Image(systemName: "trash").foregroundStyle(.secondary)
                         }
                         .buttonStyle(.borderless)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
                 }
             }
         }
@@ -232,7 +241,7 @@ struct PreferencesView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         if panel.runModal() == .OK, let url = panel.url {
-            watchFolders.append(url.path)
+            withAnimation(.easeInOut(duration: 0.18)) { watchFolders.append(url.path) }
             save()
         }
     }
@@ -242,7 +251,7 @@ struct PreferencesView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         if panel.runModal() == .OK, let url = panel.url {
-            repos.append(url.path)
+            withAnimation(.easeInOut(duration: 0.18)) { repos.append(url.path) }
             save()
         }
     }
