@@ -141,7 +141,11 @@ APPLESCRIPT
     echo "[$ts] $name: commit creado (\"$message\")" >> "$LOG_FILE"
 
     if [ "$button" = "Commit + Push" ]; then
-        if "$GIT_BIN" -C "$dir" push 2>/tmp/git_review_err; then
+        if ! "$GIT_BIN" -C "$dir" ls-remote --exit-code origin >/dev/null 2>&1; then
+            # Remoto no disponible ahora mismo (ej. disco externo desconectado)
+            # → mismo trato silencioso que un fetch fallido, sin alerta.
+            echo "[$ts] $name: push omitido, remoto no disponible" >> "$LOG_FILE"
+        elif "$GIT_BIN" -C "$dir" push 2>/tmp/git_review_err; then
             echo "[$ts] $name: push OK" >> "$LOG_FILE"
         else
             show_alert "Error en $name" "git push falló: $(tail -n1 /tmp/git_review_err)"
