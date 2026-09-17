@@ -5,8 +5,10 @@ APP="/Users/alex/Applications/RepoWatch.app"
 ICONSET="$DIR/AppIcon.iconset"
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/scripts"
 cp "$DIR/Info.plist" "$APP/Contents/Info.plist"
+cp "$DIR/Resources/scripts/"*.sh "$APP/Contents/Resources/scripts/"
+chmod +x "$APP/Contents/Resources/scripts/"*.sh
 
 # Icono: symbol de SF Symbols sobre fondo de color, generado con AppKit.
 rm -rf "$ICONSET"
@@ -23,6 +25,7 @@ rm "$ICONSET/master.png"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET" "$DIR/gen_icon"
 
-swiftc -O -parse-as-library "$DIR/main.swift" -o "$APP/Contents/MacOS/RepoWatch"
+swiftc -O -parse-as-library "$DIR/main.swift" "$DIR/Config.swift" "$DIR/PreferencesView.swift" \
+    -o "$APP/Contents/MacOS/RepoWatch"
 codesign --force --deep --sign - "$APP"
 echo "Built: $APP"

@@ -1,16 +1,21 @@
 #!/bin/bash
-# Recorre los repos vigilados y, para cada uno que tenga cambios sin
-# commitear, muestra una ventana con el detalle de archivos modificados y un
-# campo para el mensaje de commit. Según el botón elegido:
-#   - Omitir: no toca el repo, pasa al siguiente.
-#   - Commit: git add -A + git commit -S (firmado con la llave SSH configurada).
-#   - Commit + Push: lo anterior + git push.
+# Recorre los repos vigilados y, para cada uno con cambios sin commitear,
+# muestra una ventana con el detalle + un campo para el mensaje de commit.
+# Según el botón:
+#   - Omitir: no toca el repo.
+#   - Commit: git add -A + git commit (firmado con SSH si está activado en
+#     Preferencias, vía -c gpg.format=ssh -c user.signingkey=... — no toca
+#     la config global de git).
+#   - Commit + Push: lo anterior + push al primer remoto que responda.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib_discover_repos.sh"
+source "$SCRIPT_DIR/lib_settings.sh"
+load_settings
 
 GIT_BIN="$(command -v git)"
-LOG_FILE="/Users/alex/scripts/logs/check_git_repos.log"
+LOG_FILE="$CONFIG_DIR/logs/check_git_repos.log"
+mkdir -p "$CONFIG_DIR/logs"
 
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
 
@@ -133,7 +138,13 @@ APPLESCRIPT
         continue
     fi
 
-    if ! "$GIT_BIN" -C "$dir" commit -S -m "$message" 2>/tmp/git_review_err; then
+    commit_ok=1
+    if [ "$SIGN_COMMITS" = "true" ] && [ -n "$SIGNING_KEY" ]; then
+        "$GIT_BIN" -C "$dir" -c gpg.format=ssh -c "user.signingkey=$SIGNING_KEY" commit -S -m "$message" 2>/tmp/git_review_err || commit_ok=0
+    else
+        "$GIT_BIN" -C "$dir" commit -m "$message" 2>/tmp/git_review_err || commit_ok=0
+    fi
+    if [ "$commit_ok" -ne 1 ]; then
         show_alert "Error en $name" "git commit falló: $(tail -n1 /tmp/git_review_err)"
         echo "[$ts] $name: git commit falló" >> "$LOG_FILE"
         continue
@@ -141,8 +152,8 @@ APPLESCRIPT
     echo "[$ts] $name: commit creado (\"$message\")" >> "$LOG_FILE"
 
     if [ "$button" = "Commit + Push" ]; then
-        # Repos con varios remotos (ej. nube: origin + ssd, discos externos
-        # que van y vienen) → usa el primero que responda, no siempre "origin".
+        # Repos con varios remotos (ej. bare repo en disco externo que va y
+        # viene) → usa el primero que responda, no siempre "origin".
         push_remote=""
         for r in $("$GIT_BIN" -C "$dir" remote); do
             if "$GIT_BIN" -C "$dir" ls-remote --exit-code "$r" >/dev/null 2>&1; then
@@ -152,8 +163,6 @@ APPLESCRIPT
         done
 
         if [ -z "$push_remote" ]; then
-            # Ningún remoto disponible ahora mismo (ej. disco externo
-            # desconectado) → mismo trato silencioso que un fetch fallido.
             echo "[$ts] $name: push omitido, ningún remoto disponible" >> "$LOG_FILE"
         elif "$GIT_BIN" -C "$dir" push "$push_remote" 2>/tmp/git_review_err; then
             echo "[$ts] $name: push OK ($push_remote)" >> "$LOG_FILE"
@@ -165,7 +174,7 @@ APPLESCRIPT
 done
 
 if [ "$any_reviewed" -eq 0 ]; then
-    osascript -e 'display notification "No hay cambios sin commitear en ningún repo." with title "Git: revisión completa"' >/dev/null 2>&1
+    osascript -e 'display notification "No hay cambios sin commitear en ningún repo." with title "RepoWatch"' >/dev/null 2>&1
 else
-    osascript -e 'display notification "Revisión de repos completada." with title "Git: revisión completa" sound name "Ping"' >/dev/null 2>&1
+    osascript -e 'display notification "Revisión de repos completada." with title "RepoWatch" sound name "Ping"' >/dev/null 2>&1
 fi

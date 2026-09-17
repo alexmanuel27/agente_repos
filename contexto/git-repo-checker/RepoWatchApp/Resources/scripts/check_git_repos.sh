@@ -1,15 +1,18 @@
 #!/bin/bash
-# Revisa si algún repo está desactualizado respecto a su remoto y/o tiene
-# cambios sin commitear (ver lib_discover_repos.sh para qué repos vigila).
-# Pensado para correr cada hora vía launchd (com.alex.checkgitrepos.plist).
+# Revisa si algún repo vigilado está desactualizado respecto a su remoto
+# y/o tiene cambios sin commitear (repos vigilados: ver lib_discover_repos.sh).
+# Disparado por RepoWatch.app según el intervalo elegido en Preferencias, o
+# manualmente desde el menú ("Revisar ahora").
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib_discover_repos.sh"
 
-LOG_FILE="/Users/alex/scripts/logs/check_git_repos.log"
-STATE_FILE="/Users/alex/scripts/last_check_state.txt"
+LOG_FILE="$CONFIG_DIR/logs/check_git_repos.log"
+STATE_FILE="$CONFIG_DIR/last_check_state.txt"
 REVIEW_SCRIPT="$SCRIPT_DIR/review_and_commit.sh"
 GIT_BIN="$(command -v git)"
+
+mkdir -p "$CONFIG_DIR/logs"
 
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
 
@@ -66,19 +69,16 @@ if [ ${#notif_lines[@]} -gt 0 ]; then
 
     notif_body="$(printf '%s\n' "${notif_lines[@]}")"
     notif_body="${notif_body%$'\n'}"
-    notif_title="Git: repos con pendientes de revisión"
+    notif_title="RepoWatch: repos con pendientes"
 
     echo "$notif_body" > "$STATE_FILE"
 
-    # Banner con sonido.
     osascript - "$notif_title" "$notif_body" <<'APPLESCRIPT' >/dev/null 2>&1
 on run argv
     display notification (item 2 of argv) with title (item 1 of argv) sound name "Ping"
 end run
 APPLESCRIPT
 
-    # Ventana flotante con el detalle. Si hay repos con cambios sin
-    # commitear, ofrece pasar directo al flujo interactivo de add/commit/push.
     if [ ${#dirty[@]} -gt 0 ]; then
         choice="$(osascript - "$notif_title" "$notif_body" <<'APPLESCRIPT' 2>/dev/null
 on run argv
