@@ -29,10 +29,7 @@ final class StatusModel: ObservableObject {
     }
 
     var isPending: Bool { status != okStatus && status != unconfiguredStatus }
-    var iconName: String {
-        if status == unconfiguredStatus { return "gearshape" }
-        return isPending ? "exclamationmark.triangle.fill" : "checkmark.circle"
-    }
+    var isUnconfigured: Bool { status == unconfiguredStatus }
 }
 
 // Corre check_git_repos.sh cada N minutos según Preferencias (reemplaza al
@@ -64,7 +61,7 @@ struct GitRepoCheckerApp: App {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
-        MenuBarExtra("RepoWatch", systemImage: model.iconName) {
+        MenuBarExtra {
             Text(model.status)
                 .font(.system(size: 12, design: .monospaced))
                 .frame(maxWidth: 340, alignment: .leading)
@@ -89,6 +86,16 @@ struct GitRepoCheckerApp: App {
                 openWindow(id: "preferences")
             }
             Button("Salir") { NSApplication.shared.terminate(nil) }
+        } label: {
+            // Misma forma que el logo (rama de git) en vez de íconos
+            // genéricos que cambian entre sí — el estado va en un punto.
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "arrow.triangle.branch")
+                    .opacity(model.isUnconfigured ? 0.4 : 1)
+                if model.isPending {
+                    Circle().fill(Color.orange).frame(width: 6, height: 6).offset(x: 3, y: -2)
+                }
+            }
         }
         .menuBarExtraStyle(.menu)
 
