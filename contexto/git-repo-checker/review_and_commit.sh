@@ -141,15 +141,25 @@ APPLESCRIPT
     echo "[$ts] $name: commit creado (\"$message\")" >> "$LOG_FILE"
 
     if [ "$button" = "Commit + Push" ]; then
-        if ! "$GIT_BIN" -C "$dir" ls-remote --exit-code origin >/dev/null 2>&1; then
-            # Remoto no disponible ahora mismo (ej. disco externo desconectado)
-            # → mismo trato silencioso que un fetch fallido, sin alerta.
-            echo "[$ts] $name: push omitido, remoto no disponible" >> "$LOG_FILE"
-        elif "$GIT_BIN" -C "$dir" push 2>/tmp/git_review_err; then
-            echo "[$ts] $name: push OK" >> "$LOG_FILE"
+        # Repos con varios remotos (ej. nube: origin + ssd, discos externos
+        # que van y vienen) → usa el primero que responda, no siempre "origin".
+        push_remote=""
+        for r in $("$GIT_BIN" -C "$dir" remote); do
+            if "$GIT_BIN" -C "$dir" ls-remote --exit-code "$r" >/dev/null 2>&1; then
+                push_remote="$r"
+                break
+            fi
+        done
+
+        if [ -z "$push_remote" ]; then
+            # Ningún remoto disponible ahora mismo (ej. disco externo
+            # desconectado) → mismo trato silencioso que un fetch fallido.
+            echo "[$ts] $name: push omitido, ningún remoto disponible" >> "$LOG_FILE"
+        elif "$GIT_BIN" -C "$dir" push "$push_remote" 2>/tmp/git_review_err; then
+            echo "[$ts] $name: push OK ($push_remote)" >> "$LOG_FILE"
         else
-            show_alert "Error en $name" "git push falló: $(tail -n1 /tmp/git_review_err)"
-            echo "[$ts] $name: push falló" >> "$LOG_FILE"
+            show_alert "Error en $name" "git push $push_remote falló: $(tail -n1 /tmp/git_review_err)"
+            echo "[$ts] $name: push falló ($push_remote)" >> "$LOG_FILE"
         fi
     fi
 done
