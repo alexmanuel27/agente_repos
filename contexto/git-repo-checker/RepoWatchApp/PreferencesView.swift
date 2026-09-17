@@ -1,10 +1,11 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 
 let brandPurple = Color(red: 0.46, green: 0.36, blue: 0.98)
 
 enum PrefSection: String, CaseIterable, Identifiable {
-    case folders, repos, schedule, signing
+    case folders, repos, schedule, signing, history
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -12,6 +13,7 @@ enum PrefSection: String, CaseIterable, Identifiable {
         case .repos: return "Repos individuales"
         case .schedule: return "Horario"
         case .signing: return "Firma de commits"
+        case .history: return "Historial"
         }
     }
     var icon: String {
@@ -20,6 +22,7 @@ enum PrefSection: String, CaseIterable, Identifiable {
         case .repos: return "arrow.triangle.branch"
         case .schedule: return "timer"
         case .signing: return "signature"
+        case .history: return "clock.arrow.circlepath"
         }
     }
 }
@@ -32,6 +35,8 @@ struct PreferencesView: View {
     @State private var signCommits: Bool
     @State private var signingKey: String
     @State private var autosyncRepos: Set<String>
+    @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
+    @State private var historyText: String = ""
 
     init() {
         let settings = RepoWatchConfig.readSettings()
@@ -54,6 +59,7 @@ struct PreferencesView: View {
                         case .repos: reposCard
                         case .schedule: scheduleCard
                         case .signing: signingCard
+                        case .history: historyCard
                         }
                     }
                     .id(selection)
@@ -151,6 +157,40 @@ struct PreferencesView: View {
             }
             .tint(brandPurple)
             .padding(.top, 4)
+
+            Divider().padding(.vertical, 4)
+
+            Toggle(isOn: $launchAtLogin) {
+                Label("Abrir RepoWatch al iniciar sesión", systemImage: "power")
+            }
+            .toggleStyle(.switch)
+            .tint(brandPurple)
+            .onChange(of: launchAtLogin) { _, enabled in
+                try? enabled ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
+            }
+        }
+    }
+
+    private var historyCard: some View {
+        card(title: "Historial", subtitle: "Últimas líneas del log de actividad.") {
+            ScrollView {
+                Text(historyText.isEmpty ? "(vacío)" : historyText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .frame(height: 300)
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([RepoWatchConfig.logFile])
+            } label: {
+                Label("Mostrar en Finder", systemImage: "folder")
+            }
+            .tint(brandPurple)
+            .padding(.top, 4)
+        }
+        .onAppear {
+            let text = (try? String(contentsOf: RepoWatchConfig.logFile, encoding: .utf8)) ?? ""
+            historyText = text.split(separator: "\n").suffix(200).joined(separator: "\n")
         }
     }
 
@@ -274,24 +314,42 @@ struct PreferencesView: View {
         NotificationCenter.default.post(name: .repoWatchConfigChanged, object: nil)
     }
 
+    private func showValidationAlert(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.runModal()
+    }
+
     private func addFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        if panel.runModal() == .OK, let url = panel.url {
-            withAnimation(.easeInOut(duration: 0.18)) { watchFolders.append(url.path) }
-            save()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if watchFolders.contains(url.path) {
+            showValidationAlert("Esa carpeta ya está en la lista.")
+            return
         }
+        withAnimation(.easeInOut(duration: 0.18)) { watchFolders.append(url.path) }
+        save()
     }
 
     private func addRepo() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        if panel.runModal() == .OK, let url = panel.url {
-            withAnimation(.easeInOut(duration: 0.18)) { repos.append(url.path) }
-            save()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if repos.contains(url.path) {
+            showValidationAlert("Ese repo ya está en la lista.")
+            return
         }
+        var isDir: ObjCBool = false
+        let gitPath = url.appendingPathComponent(".git").path
+        guard FileManager.default.fileExists(atPath: gitPath, isDirectory: &isDir) else {
+            showValidationAlert("\"\(url.lastPathComponent)\" no parece un repo git (no tiene .git adentro).")
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.18)) { repos.append(url.path) }
+        save()
     }
 
     private func chooseSigningKey() {

@@ -17,10 +17,12 @@ source "$SCRIPT_DIR/lib_repo_config.sh"
 source "$SCRIPT_DIR/lib_commit_safety.sh"
 load_settings
 
+PENDING_NOTIF_FILE="$CONFIG_DIR/pending_notification.txt"
+
 # Evita dos revisiones a la vez (ej. clic manual mientras corre otra).
 LOCK_DIR="$CONFIG_DIR/.review.lock"
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    osascript -e 'display notification "Ya hay una revisión en curso." with title "RepoWatch"' >/dev/null 2>&1
+    echo "Ya hay una revisión en curso." > "$PENDING_NOTIF_FILE"
     exit 0
 fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
@@ -107,10 +109,17 @@ APPLESCRIPT
     suggested_message="$(suggest_commit_message "$status_short" "$n_lines")"
     push_mode="$(repo_get "$dir" push ask)"
 
+    diff_stat="$("$GIT_BIN" -C "$dir" diff --stat 2>/dev/null | tail -n 10)"
+
     prompt="Rama: $branch
 
 Cambios ($n_lines archivo(s)):
-$display_status
+$display_status"
+    [ -n "$diff_stat" ] && prompt="$prompt
+
+Líneas modificadas:
+$diff_stat"
+    prompt="$prompt
 
 Mensaje de commit:"
 
@@ -160,6 +169,24 @@ APPLESCRIPT
         continue
     fi
 
+    secret_hits="$(find_secret_content "$dir")"
+    if [ -n "$secret_hits" ]; then
+        warn_choice="$(osascript - "$name" "$secret_hits" <<'APPLESCRIPT' 2>/dev/null
+on run argv
+    set theResult to display alert ("⚠️ Posible secreto en el contenido de " & (item 1 of argv)) message ("Se encontró un patrón de credencial dentro de un archivo:" & return & return & (item 2 of argv) & return & return & "¿Continuar de todas formas?") buttons {"Omitir repo", "Continuar"} default button "Omitir repo"
+    return button returned of theResult
+end run
+APPLESCRIPT
+)"
+        if [ "$warn_choice" != "Continuar" ]; then
+            echo "[$ts] $name: omitido por secreto en contenido" >> "$LOG_FILE"
+            if [ "$was_index_clean" -eq 1 ]; then
+                "$GIT_BIN" -C "$dir" reset >/dev/null 2>&1
+            fi
+            continue
+        fi
+    fi
+
     sign_mode="$(repo_get "$dir" sign "$SIGN_COMMITS")"
     signing_key="$(repo_get "$dir" signing_key "$SIGNING_KEY")"
     commit_ok=1
@@ -178,6 +205,7 @@ APPLESCRIPT
     fi
     echo "[$ts] $name: commit creado (\"$message\")" >> "$LOG_FILE"
 
+    pushed=0
     if [ "$button" = "Commit + Push" ]; then
         push_remote=""
         for r in $("$GIT_BIN" -C "$dir" remote); do
@@ -191,15 +219,17 @@ APPLESCRIPT
             echo "[$ts] $name: push omitido, ningún remoto disponible" >> "$LOG_FILE"
         elif "$GIT_BIN" -C "$dir" push "$push_remote" 2>/tmp/git_review_err; then
             echo "[$ts] $name: push OK ($push_remote)" >> "$LOG_FILE"
+            pushed=1
         else
             show_alert "Error en $name" "git push $push_remote falló: $(tail -n1 /tmp/git_review_err)"
             echo "[$ts] $name: push falló ($push_remote)" >> "$LOG_FILE"
         fi
     fi
+    record_commit "$dir" "$pushed"
 done
 
 if [ "$any_reviewed" -eq 0 ]; then
-    osascript -e 'display notification "No hay cambios sin commitear en ningún repo." with title "RepoWatch"' >/dev/null 2>&1
+    echo "No hay cambios sin commitear en ningún repo." > "$PENDING_NOTIF_FILE"
 else
-    osascript -e 'display notification "Revisión de repos completada." with title "RepoWatch" sound name "Ping"' >/dev/null 2>&1
+    echo "Revisión de repos completada." > "$PENDING_NOTIF_FILE"
 fi

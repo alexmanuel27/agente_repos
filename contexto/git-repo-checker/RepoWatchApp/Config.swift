@@ -18,6 +18,7 @@ enum RepoWatchConfig {
     static var stateFile: URL { configDir.appendingPathComponent("last_check_state.txt") }
     static var lastCheckFile: URL { configDir.appendingPathComponent("last_check.txt") }
     static var overridesFile: URL { configDir.appendingPathComponent("repo_overrides.txt") }
+    static var pendingNotificationFile: URL { configDir.appendingPathComponent("pending_notification.txt") }
     static var logFile: URL { configDir.appendingPathComponent("logs/check_git_repos.log") }
 
     static var scriptsDir: String { Bundle.main.resourcePath! + "/scripts" }
@@ -101,9 +102,27 @@ extension Notification.Name {
     static let repoWatchConfigChanged = Notification.Name("repoWatchConfigChanged")
 }
 
-func runScript(_ name: String) {
+func runScript(_ name: String, args: [String] = []) {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/bin/bash")
+    task.arguments = ["\(RepoWatchConfig.scriptsDir)/\(name)"] + args
+    try? task.run()
+}
+
+// Corre un script y espera su salida (uso: listas cortas, como
+// list_undoable.sh — nunca para los flujos que abren diálogos).
+func runScriptCapture(_ name: String) -> String {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/bin/bash")
     task.arguments = ["\(RepoWatchConfig.scriptsDir)/\(name)"]
-    try? task.run()
+    let pipe = Pipe()
+    task.standardOutput = pipe
+    do {
+        try task.run()
+        task.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8) ?? ""
+    } catch {
+        return ""
+    }
 }

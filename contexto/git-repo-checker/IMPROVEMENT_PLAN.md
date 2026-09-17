@@ -140,6 +140,18 @@ Arreglo nativo, no un filtro propio de RepoWatch: botón "Ignorar
 
 ## 4. Nivel 2 — Medio (trabajo real, alcance contenido)
 
+**✅ Implementado por completo** (M1 ya estaba desde el Nivel 1; M2–M10
+agregados después): notificaciones nativas con respaldo automático a
+`osascript` (verificado con captura de pantalla — sí obtuvo permiso pese a
+la firma ad-hoc), detección de `ahead` + acciones "Pushear pendientes" /
+"Actualizar (pull --ff-only)", toggle de inicio automático vía
+`SMAppService`, `git diff --stat` en el diálogo de revisión, escaneo de
+secretos por contenido (no solo nombre de archivo) antes de cada commit,
+"Deshacer último commit" por repo (submenú dinámico, solo si no se
+pusheó), historial dentro de Preferencias, "Posponer 1h", y validación al
+agregar carpetas/repos (duplicados, `.git` faltante). Ver README.md para
+el detalle de cada uno.
+
 - **M1.** Configuración por repo completa (§2): `repo_overrides.txt`, las 6 claves, `autosync` con sus 5 guardas, panel con presets.
 - **M2.** Notificaciones nativas desde Swift (`UNUserNotificationCenter`) en vez de `osascript display notification` — hoy el banner aparece atribuido a "Script Editor", no a RepoWatch, y si el usuario alguna vez desactivó notificaciones de Script Editor, las de RepoWatch se pierden en silencio.
 - **M3.** Detectar commits locales sin subir ("ahead"), no solo "behind" — y agregar acción de Pull. Hoy si ambos discos de `nube` están desconectados al hacer commit, el push se salta y el repo queda "limpio" con commits atrapados localmente, sin aviso.

@@ -6,6 +6,8 @@
 
 # Nombres de archivo que podrían contener secretos. Coincide contra el
 # basename de cada archivo con cambios.
+LAST_COMMITS_FILE="$CONFIG_DIR/last_commits.txt"
+
 SENSITIVE_PATTERNS=(
     ".env" ".env.*" "*.pem" "*.key" "*.p12" "*.pfx" "*.keystore" "*.ppk"
     "id_rsa" "id_rsa.*" "id_ed25519" "id_ed25519.*" "id_ecdsa" "id_ecdsa.*"
@@ -45,6 +47,29 @@ find_large_files() {
             printf '%s (%d MB)\n' "$path" "$((size / 1048576))"
         fi
     done <<< "$status"
+}
+
+# $1 = directorio. Busca patrones de secretos en el CONTENIDO de lo ya
+# stageado (`git diff --cached`), no solo en nombres de archivo — cubre el
+# caso de una llave pegada dentro de un .md o .txt cualquiera.
+find_secret_content() {
+    local dir="$1"
+    "$GIT_BIN" -C "$dir" diff --cached -U0 2>/dev/null | \
+        grep -Eo 'AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' | \
+        sort -u
+}
+
+# Registra el último commit hecho por RepoWatch en un repo, para poder
+# ofrecer "deshacer" después (solo válido mientras HEAD siga siendo ese sha
+# y no se haya pusheado). Una línea por repo, sobreescribe la anterior.
+record_commit() {
+    local dir="$1" pushed="$2" sha
+    sha="$("$GIT_BIN" -C "$dir" rev-parse HEAD 2>/dev/null)"
+    [ -z "$sha" ] && return
+    local tmp="$LAST_COMMITS_FILE.tmp"
+    { [ -f "$LAST_COMMITS_FILE" ] && grep -v "^${dir}	" "$LAST_COMMITS_FILE"; \
+      printf '%s\t%s\t%s\n' "$dir" "$sha" "$pushed"; } > "$tmp"
+    mv "$tmp" "$LAST_COMMITS_FILE"
 }
 
 # Sugiere un mensaje de commit a partir de los archivos cambiados: lista los
@@ -103,6 +128,12 @@ autosync_commit() {
         "$GIT_BIN" -C "$dir" add -A
     fi
 
+    if [ -n "$(find_secret_content "$dir")" ]; then
+        echo "autosync omitido ($name): posible secreto en el contenido de un archivo" >&2
+        "$GIT_BIN" -C "$dir" reset >/dev/null 2>&1
+        return 1
+    fi
+
     local msg commit_ok=1 sign_mode signing_key
     msg="Sync $(date "+%Y-%m-%d %H:%M")"
     sign_mode="$(repo_get "$dir" sign "$SIGN_COMMITS")"
@@ -120,6 +151,7 @@ autosync_commit() {
         return 1
     fi
 
+    local pushed=0
     local push_mode; push_mode="$(repo_get "$dir" push auto)"
     if [ "$push_mode" != "never" ]; then
         local push_remote=""
@@ -129,8 +161,11 @@ autosync_commit() {
                 break
             fi
         done
-        [ -n "$push_remote" ] && "$GIT_BIN" -C "$dir" push "$push_remote" >/dev/null 2>&1
+        if [ -n "$push_remote" ] && "$GIT_BIN" -C "$dir" push "$push_remote" >/dev/null 2>&1; then
+            pushed=1
+        fi
     fi
 
+    record_commit "$dir" "$pushed"
     return 0
 }
