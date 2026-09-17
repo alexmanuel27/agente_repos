@@ -141,6 +141,13 @@ struct PreferencesView: View {
                     .labelsHidden()
                     .onChange(of: intervalMinutes) { _, _ in save() }
             }
+            Button {
+                runScript("check_git_repos.sh")
+            } label: {
+                Label("Revisar ahora", systemImage: "arrow.clockwise")
+            }
+            .tint(brandPurple)
+            .padding(.top, 4)
         }
     }
 
