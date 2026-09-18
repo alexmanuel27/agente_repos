@@ -7,6 +7,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib_discover_repos.sh"
 source "$SCRIPT_DIR/lib_repo_config.sh"
+source "$SCRIPT_DIR/lib_commit_safety.sh"
 
 GIT_BIN="$(command -v git)"
 LOG_FILE="$CONFIG_DIR/logs/check_git_repos.log"
@@ -23,10 +24,8 @@ for dir in "${repos[@]}"; do
     [ "$(repo_get "$dir" enabled true)" = "false" ] && continue
     name="$(basename "$dir")"
 
-    upstream="$("$GIT_BIN" -C "$dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"
-    [ -z "$upstream" ] && continue
-    ahead="$("$GIT_BIN" -C "$dir" rev-list --count '@{u}..HEAD' 2>/dev/null)"
-    [ -z "$ahead" ] || [ "$ahead" -eq 0 ] && continue
+    ahead="$(unpushed_count "$dir")"
+    [ "$ahead" -eq 0 ] && continue
 
     push_remote=""
     for r in $("$GIT_BIN" -C "$dir" remote); do

@@ -72,6 +72,7 @@ ahead=()
 dirty=()
 errors=()
 autosynced=()
+autocommitted=()
 
 for dir in "${repos[@]}"; do
     name="$(basename "$dir")"
@@ -91,10 +92,6 @@ for dir in "${repos[@]}"; do
             if [ -n "$behind" ] && [ "$behind" -gt 0 ]; then
                 outdated+=("• $name [$branch] — $behind commit(s) detrás de $upstream")
             fi
-            ahead_n="$("$GIT_BIN" -C "$dir" rev-list --count '@{u}..HEAD' 2>/dev/null)"
-            if [ -n "$ahead_n" ] && [ "$ahead_n" -gt 0 ]; then
-                ahead+=("• $name [$branch] — $ahead_n commit(s) sin subir")
-            fi
         fi
     fi
 
@@ -111,10 +108,21 @@ for dir in "${repos[@]}"; do
 
         if [ "$(repo_get "$dir" mode review)" = "autosync" ] && \
            autosync_commit "$dir" "$status_output" 2>>"$LOG_FILE"; then
-            autosynced+=("$name ($n_changes archivo(s))")
+            if [ "$AUTOSYNC_PUSHED" = "1" ]; then
+                autosynced+=("$name ($n_changes archivo(s))")
+            else
+                autocommitted+=("$name ($n_changes archivo(s))")
+            fi
         else
             dirty+=("• $name [$branch] — $n_changes archivo(s) ($n_staged listo(s), $n_untracked sin trackear)")
         fi
+    fi
+
+    # Después del autosync (para contar el commit recién hecho) y sin
+    # depender del fetch: no necesita red, solo las refs remotas locales.
+    ahead_n="$(unpushed_count "$dir")"
+    if [ "$ahead_n" -gt 0 ]; then
+        ahead+=("• $name [$branch] — $ahead_n commit(s) sin subir")
     fi
 done
 
@@ -186,6 +194,12 @@ else
     # "Revisar ahora" manual sí quiere confirmación aunque no haya nada —
     # si no, un clic sin pendientes se siente como si no hubiera pasado nada.
     [ "$1" = "--manual" ] && echo "Todo al día ✅ — sin pendientes." > "$PENDING_NOTIF_FILE"
+fi
+
+# Solo commit local (no hubo remoto alcanzable): sin aviso propio, el repo ya
+# aparece en "Sin subir" con su botón "Pushear pendientes".
+if [ ${#autocommitted[@]} -gt 0 ]; then
+    echo "[$ts] Autosync (solo commit local, sin push): $(IFS='; '; echo "${autocommitted[*]}")" >> "$LOG_FILE"
 fi
 
 if [ ${#autosynced[@]} -gt 0 ]; then

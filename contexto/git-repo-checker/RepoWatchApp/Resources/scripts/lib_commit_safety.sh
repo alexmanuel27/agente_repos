@@ -167,5 +167,16 @@ autosync_commit() {
     fi
 
     record_commit "$dir" "$pushed"
+    AUTOSYNC_PUSHED="$pushed"
     return 0
+}
+
+# $1 = directorio. Commits que no están en NINGUNA ref remota local (no en
+# solo la del upstream): con varios remotos (origin desconectado + ssd), un
+# push a ssd deja al repo "al día" aunque siga adelantado de origin. No usa
+# red — compara contra las refs de tracking ya guardadas. 0 si no hay remotos.
+unpushed_count() {
+    local dir="$1"
+    [ -z "$("$GIT_BIN" -C "$dir" remote 2>/dev/null)" ] && { echo 0; return; }
+    "$GIT_BIN" -C "$dir" rev-list --count HEAD --not --remotes 2>/dev/null || echo 0
 }
