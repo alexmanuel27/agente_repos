@@ -9,6 +9,7 @@ final class StatusModel: ObservableObject {
     @Published var status: String = "Cargando…"
     @Published var lastCheckText: String = "nunca revisado"
     @Published var isStale: Bool = false
+    @Published var vaultWarnings: Int = 0
     private var timer: Timer?
 
     init() {
@@ -20,6 +21,9 @@ final class StatusModel: ObservableObject {
 
     func refresh() {
         updateLastCheck()
+        let warnings = (try? String(contentsOf: RepoWatchConfig.vaultWarningsFile, encoding: .utf8))
+            .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+        vaultWarnings = RepoWatchConfig.vaultDir.isEmpty ? 0 : warnings
         guard RepoWatchConfig.isConfigured else {
             status = unconfiguredStatus
             return
@@ -67,6 +71,7 @@ final class Scheduler: ObservableObject {
         // Primera corrida a los 30s, no hay que esperar el intervalo completo.
         DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
             runScript("check_git_repos.sh")
+            runScript("check_vault.sh")
         }
     }
 
@@ -75,6 +80,7 @@ final class Scheduler: ObservableObject {
         let minutes = Double(RepoWatchConfig.readSettings()["interval_minutes"] ?? "60") ?? 60
         timer = Timer.scheduledTimer(withTimeInterval: minutes * 60, repeats: true) { _ in
             runScript("check_git_repos.sh")
+            runScript("check_vault.sh")
         }
     }
 }
@@ -180,6 +186,11 @@ struct GitRepoCheckerApp: App {
             Text("Última revisión: \(model.lastCheckText)")
                 .font(.system(size: 10))
                 .foregroundStyle(model.isStale ? .red : .secondary)
+            if model.vaultWarnings > 0 {
+                Button("Vault: \(model.vaultWarnings) \(model.vaultWarnings == 1 ? "aviso" : "avisos")") {
+                    NSWorkspace.shared.open(RepoWatchConfig.vaultReportFile)
+                }
+            }
 
             Divider()
 

@@ -20,6 +20,35 @@ enum RepoWatchConfig {
     static var overridesFile: URL { configDir.appendingPathComponent("repo_overrides.txt") }
     static var pendingNotificationFile: URL { configDir.appendingPathComponent("pending_notification.txt") }
     static var logFile: URL { configDir.appendingPathComponent("logs/check_git_repos.log") }
+    static var vaultWarningsFile: URL { configDir.appendingPathComponent("vault_warnings.txt") }
+
+    // Carpeta de memoria (Obsidian); vacía = revisión del vault desactivada.
+    static var vaultDir: String { readSettings()["vault_dir"] ?? "" }
+    static var vaultReportFile: URL {
+        URL(fileURLWithPath: vaultDir).appendingPathComponent("Mantenimiento del vault.md")
+    }
+    static var vaultLastFile: URL { configDir.appendingPathComponent("vault_last.txt") }
+
+    // Vale un vault de Obsidian (tiene .obsidian) o una carpeta con Inicio.md
+    // adentro o en una subcarpeta directa.
+    static func isVaultFolder(_ path: String) -> Bool {
+        let fm = FileManager.default
+        let root = URL(fileURLWithPath: path)
+        if fm.fileExists(atPath: root.appendingPathComponent(".obsidian").path) { return true }
+        if fm.fileExists(atPath: root.appendingPathComponent("Inicio.md").path) { return true }
+        let subs = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        return subs.contains { fm.fileExists(atPath: $0.appendingPathComponent("Inicio.md").path) }
+    }
+
+    // "epoch avisos aplicados" de la última revisión (vault_last.txt).
+    static func vaultSummary() -> String? {
+        guard let text = try? String(contentsOf: vaultLastFile, encoding: .utf8) else { return nil }
+        let p = text.split(separator: " ").compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        guard p.count == 3 else { return nil }
+        let minutes = Int((Date().timeIntervalSince1970 - Double(p[0])) / 60)
+        let when = minutes < 1 ? "hace instantes" : "hace \(minutes) min"
+        return "Última revisión \(when): \(p[2]) cambio(s) aplicado(s), \(p[1]) aviso(s)."
+    }
 
     static var scriptsDir: String { Bundle.main.resourcePath! + "/scripts" }
 
@@ -107,6 +136,16 @@ func runScript(_ name: String, args: [String] = []) {
     task.executableURL = URL(fileURLWithPath: "/bin/bash")
     task.arguments = ["\(RepoWatchConfig.scriptsDir)/\(name)"] + args
     try? task.run()
+}
+
+// Corre un script y avisa en el hilo principal cuando termina (para mostrar
+// progreso en la interfaz).
+func runScriptAsync(_ name: String, args: [String] = [], completion: @escaping () -> Void) {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/bin/bash")
+    task.arguments = ["\(RepoWatchConfig.scriptsDir)/\(name)"] + args
+    task.terminationHandler = { _ in DispatchQueue.main.async(execute: completion) }
+    do { try task.run() } catch { DispatchQueue.main.async(execute: completion) }
 }
 
 // Corre un script y espera su salida (uso: listas cortas, como

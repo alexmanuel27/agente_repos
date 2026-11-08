@@ -5,7 +5,7 @@ import ServiceManagement
 let brandPurple = Color(red: 0.46, green: 0.36, blue: 0.98)
 
 enum PrefSection: String, CaseIterable, Identifiable {
-    case folders, repos, schedule, signing, history
+    case folders, repos, schedule, signing, vault, history
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -13,6 +13,7 @@ enum PrefSection: String, CaseIterable, Identifiable {
         case .repos: return "Repos individuales"
         case .schedule: return "Horario"
         case .signing: return "Firma de commits"
+        case .vault: return "Vault"
         case .history: return "Historial"
         }
     }
@@ -22,6 +23,7 @@ enum PrefSection: String, CaseIterable, Identifiable {
         case .repos: return "arrow.triangle.branch"
         case .schedule: return "timer"
         case .signing: return "signature"
+        case .vault: return "books.vertical"
         case .history: return "clock.arrow.circlepath"
         }
     }
@@ -34,6 +36,9 @@ struct PreferencesView: View {
     @State private var intervalMinutes: Double
     @State private var signCommits: Bool
     @State private var signingKey: String
+    @State private var vaultDir: String
+    @State private var vaultRunning = false
+    @State private var vaultSummary: String? = RepoWatchConfig.vaultSummary()
     @State private var autosyncRepos: Set<String>
     @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
     @State private var historyText: String = ""
@@ -43,6 +48,7 @@ struct PreferencesView: View {
         _intervalMinutes = State(initialValue: Double(settings["interval_minutes"] ?? "60") ?? 60)
         _signCommits = State(initialValue: settings["sign_commits"] == "true")
         _signingKey = State(initialValue: settings["signing_key"] ?? "")
+        _vaultDir = State(initialValue: settings["vault_dir"] ?? "")
         let synced = RepoWatchConfig.readOverrides().filter { $0.value["mode"] == "autosync" }.keys
         _autosyncRepos = State(initialValue: Set(synced))
     }
@@ -59,6 +65,7 @@ struct PreferencesView: View {
                         case .repos: reposCard
                         case .schedule: scheduleCard
                         case .signing: signingCard
+                        case .vault: vaultCard
                         case .history: historyCard
                         }
                     }
@@ -218,6 +225,57 @@ struct PreferencesView: View {
         }
     }
 
+    private var vaultCard: some View {
+        card(title: "Vault de Obsidian", subtitle: "Elige la carpeta raíz del vault: se revisan todas sus carpetas. En cada revisión archiva Registro largo, completa Inicio.md, enlaza entre sí los índices de cada carpeta y escribe «Mantenimiento del vault.md» con lo demás (enlaces rotos, notas sin enlazar, Fichas largas…). Guarda copia de cada nota que toca en vault_backups. Vacía = desactivado.") {
+            HStack(spacing: 10) {
+                Image(systemName: "books.vertical").foregroundStyle(.secondary)
+                Text(vaultDir.isEmpty ? "Sin carpeta elegida (desactivado)" : vaultDir)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(vaultDir.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                if !vaultDir.isEmpty {
+                    Button("Quitar") { vaultDir = ""; save() }
+                }
+                Button("Elegir…") { chooseVaultDir() }
+                    .tint(brandPurple)
+            }
+            if !vaultDir.isEmpty && !vaultIsValid {
+                Label("Esta carpeta no parece un vault de Obsidian (sin .obsidian ni Inicio.md).", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .font(.system(size: 12))
+            }
+            if !vaultDir.isEmpty && vaultIsValid {
+                HStack(spacing: 10) {
+                    Button {
+                        vaultRunning = true
+                        runScriptAsync("check_vault.sh", args: ["--manual"]) {
+                            vaultRunning = false
+                            vaultSummary = RepoWatchConfig.vaultSummary()
+                        }
+                    } label: {
+                        Label("Revisar ahora", systemImage: "arrow.clockwise")
+                    }
+                    .tint(brandPurple)
+                    .disabled(vaultRunning)
+                    if vaultRunning {
+                        ProgressView().controlSize(.small)
+                        Text("Revisando el vault y los repos…")
+                            .font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Abrir informe") { NSWorkspace.shared.open(RepoWatchConfig.vaultReportFile) }
+                        .disabled(vaultRunning || vaultSummary == nil)
+                }
+                .padding(.top, 4)
+                if !vaultRunning, let vaultSummary {
+                    Text(vaultSummary).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     // MARK: Building blocks
 
     private func card<Content: View>(
@@ -310,6 +368,7 @@ struct PreferencesView: View {
             "interval_minutes": String(Int(intervalMinutes)),
             "sign_commits": signCommits ? "true" : "false",
             "signing_key": signingKey,
+            "vault_dir": vaultDir,
         ])
         NotificationCenter.default.post(name: .repoWatchConfigChanged, object: nil)
     }
@@ -349,6 +408,21 @@ struct PreferencesView: View {
             return
         }
         withAnimation(.easeInOut(duration: 0.18)) { repos.append(url.path) }
+        save()
+    }
+
+    private var vaultIsValid: Bool { RepoWatchConfig.isVaultFolder(vaultDir) }
+
+    private func chooseVaultDir() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard RepoWatchConfig.isVaultFolder(url.path) else {
+            showValidationAlert("\"\(url.lastPathComponent)\" no parece un vault de Obsidian (sin .obsidian ni Inicio.md). Elige la carpeta raíz del vault.")
+            return
+        }
+        vaultDir = url.path
         save()
     }
 
