@@ -26,6 +26,7 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET" "$DIR/gen_icon"
 
 swiftc -O -parse-as-library "$DIR/main.swift" "$DIR/Config.swift" "$DIR/PreferencesView.swift" \
+    "$DIR/VaultScan.swift" "$DIR/MemoryView.swift" \
     -o "$APP/Contents/MacOS/RepoWatch"
 codesign --force --deep --sign - "$APP"
 echo "Built: $APP"

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/alex/Nube /repos/agente_repos/.codex/hooks/vault_ficha.sh'"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -171,6 +171,7 @@ struct GitRepoCheckerApp: App {
     @StateObject private var scheduler: Scheduler
     private let notifWatcher: NotificationWatcher
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
 
     init() {
         _model = StateObject(wrappedValue: StatusModel())
@@ -212,6 +213,13 @@ struct GitRepoCheckerApp: App {
                 }
             }
 
+            if !RepoWatchConfig.vaultDir.isEmpty {
+                Button("Memoria del vault…") {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: "memory")
+                }
+            }
+
             Button("Ver log") { NSWorkspace.shared.open(RepoWatchConfig.logFile) }
 
             Divider()
@@ -233,6 +241,11 @@ struct GitRepoCheckerApp: App {
             }
         }
         .menuBarExtraStyle(.menu)
+
+        Window("Memoria del vault", id: "memory") {
+            MemoryView()
+        }
+        .defaultSize(width: 780, height: 640)
 
         Settings {
             PreferencesView()
