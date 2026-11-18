@@ -57,9 +57,9 @@ for dir in "${repos[@]}"; do
     [ "$(repo_get "$dir" enabled true)" = "false" ] && continue
 
     if [ "$(repo_get "$dir" untracked include)" = "ignore" ]; then
-        status_short="$("$GIT_BIN" -C "$dir" status --short -uno 2>/dev/null)"
+        status_short="$("$GIT_BIN" -C "$dir" -c core.quotepath=false status --short -uno 2>/dev/null)"
     else
-        status_short="$("$GIT_BIN" -C "$dir" status --short --untracked-files=all 2>/dev/null)"
+        status_short="$("$GIT_BIN" -C "$dir" -c core.quotepath=false status --short --untracked-files=all 2>/dev/null)"
     fi
     [ -z "$status_short" ] && continue
 

@@ -59,6 +59,7 @@ done < <(discover_repos | awk '!seen[$0]++')
 ROWS_TMP="$STATUS_FILE.tmp"
 : > "$ROWS_TMP"
 problems=()
+RW_NOTES=()
 n_repos=0
 n_acted=0
 
@@ -76,9 +77,9 @@ for dir in "${repos[@]}"; do
     "$GIT_BIN" -C "$dir" fetch --quiet 2>/dev/null || fetched=0
 
     if [ "$(repo_get "$dir" untracked include)" = "ignore" ]; then
-        status_output="$("$GIT_BIN" -C "$dir" status --porcelain -uno 2>/dev/null)"
+        status_output="$("$GIT_BIN" -C "$dir" -c core.quotepath=false status --porcelain -uno 2>/dev/null)"
     else
-        status_output="$("$GIT_BIN" -C "$dir" status --porcelain --untracked-files=all 2>/dev/null)"
+        status_output="$("$GIT_BIN" -C "$dir" -c core.quotepath=false status --porcelain --untracked-files=all 2>/dev/null)"
     fi
 
     if [ -n "$status_output" ]; then
@@ -112,6 +113,18 @@ for dir in "${repos[@]}"; do
         fi
     else
         nofetch=1
+    fi
+
+    # Excepción de tamaño (solo repos con remoto GitHub): si lo no subido lleva
+    # archivos de más de 100MB, se sacan de esos commits y se ignoran antes del
+    # push, en vez de dejar que GitHub lo rechace.
+    if [ "$mode" = "autosync" ] && [ ${#probs[@]} -eq 0 ] && has_size_limit "$dir" && [ "$(unpushed_count "$dir")" -gt 0 ]; then
+        fix_large_unpushed "$dir"; rc=$?
+        case "$rc" in
+            0) acts+=("archivos grandes sacados de los commits y añadidos a .gitignore")
+               echo "[$ts] $name: excepción de tamaño aplicada" >> "$LOG_FILE" ;;
+            2) probs+=("archivos de más de 100MB en commits sin subir y no se pudo arreglar solo: $FIX_ERR") ;;
+        esac
     fi
 
     unpushed="$(unpushed_count "$dir")"
@@ -154,15 +167,24 @@ mv "$ROWS_TMP" "$STATUS_FILE"
 date +%s > "$LAST_CHECK_FILE"
 echo "[$ts] Revisión: $n_repos repo(s), $n_acted con acción automática, ${#problems[@]} problema(s)." >> "$LOG_FILE"
 
+# Avisos de la excepción de tamaño: siempre se avisan (son cambios en tu
+# repo que no pediste commit a commit).
+notes_text=""
+if [ ${#RW_NOTES[@]} -gt 0 ]; then
+    notes_text="$(printf '%s\n' "${RW_NOTES[@]}")"
+    printf '[%s] %s\n' "$ts" "$notes_text" >> "$LOG_FILE"
+    printf '%s\n' "$notes_text" > "$PENDING_NOTIF_FILE"
+fi
+
 if [ ${#problems[@]} -gt 0 ]; then
     body="$(printf '%s\n' "${problems[@]}" | head -n 6)"
     sig="$(printf '%s' "$body" | cksum)"
     if [ "$manual" -eq 1 ] || [ "$sig" != "$(cat "$LAST_PROBLEM_FILE" 2>/dev/null)" ] || \
        [ -n "$(find "$LAST_PROBLEM_FILE" -mmin +1440 2>/dev/null)" ]; then
-        printf '%s problema(s) por revisar:\n%s\n' "${#problems[@]}" "$body" > "$PENDING_NOTIF_FILE"
+        printf '%s problema(s) por revisar:\n%s\n' "${#problems[@]}" "$body" >> "$PENDING_NOTIF_FILE"
         echo "$sig" > "$LAST_PROBLEM_FILE"
     fi
 else
     rm -f "$LAST_PROBLEM_FILE"
-    [ "$manual" -eq 1 ] && echo "Todo en orden ✅ — $n_repos repo(s), $n_acted con acción automática." > "$PENDING_NOTIF_FILE"
+    [ "$manual" -eq 1 ] && echo "Todo en orden ✅ — $n_repos repo(s), $n_acted con acción automática." >> "$PENDING_NOTIF_FILE"
 fi

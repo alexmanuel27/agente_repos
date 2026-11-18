@@ -77,4 +77,35 @@ echo m > "$T/w/beta/m"; run
 has   "review: queda como problema" "$(row beta)" "problem|1 archivo(s) sin commitear (modo manual)"
 check "review: no commiteó" "$(git -C "$T/w/beta" status --porcelain | wc -l | tr -d ' ')" "1"
 
+# ---- excepción de tamaño (>100MB en GitHub; aquí 2000 bytes y "GitHub" = zeta/iota) ----
+export LARGE_FILE_BYTES=2000 SIZE_LIMIT_REMOTE_PATTERN="$T/zeta|$T/iota"
+big() { head -c 3000 /dev/zero > "$1"; }
+for r in zeta iota theta; do mkrepo $r; done
+# zeta: archivo grande SIN trackear junto a uno chico → se ignora, el resto se commitea
+big "$T/w/zeta/big.bin"; echo ok > "$T/w/zeta/s.txt"
+# iota: commit sin subir que ya trae el grande, y otro commit encima
+( cd "$T/w/iota" && mkdir data && big "data/huge file.bin" && git add -A && git commit -qm grande && echo l > later && git add later && git commit -qm later )
+# theta: grande sin subir pero remoto sin límite (no es GitHub) → no se toca
+( cd "$T/w/theta" && big big2.bin && git add -A && git commit -qm grande )
+beta_override="$(cat "$C/repo_overrides.txt")"; : > "$C/repo_overrides.txt"
+run
+has   "zeta: se ignora el grande" "$(cat "$T/w/zeta/.gitignore")" "/big.bin"
+check "zeta: el grande sigue en disco" "$(wc -c < "$T/w/zeta/big.bin" | tr -d ' ')" "3000"
+check "zeta: el grande no está en el remoto" "$(git -C "$T/zeta.git" ls-tree -r --name-only main | grep -c big.bin)" "0"
+has   "zeta: lo chico sí subió" "$(git -C "$T/zeta.git" ls-tree -r --name-only main)" "s.txt"
+has   "zeta: fila synced" "$(row zeta)" "synced|"
+check "iota: ya no hay blob grande en el historial" "$(git -C "$T/w/iota" rev-list --objects HEAD | grep -c 'huge file')" "0"
+check "iota: el archivo sigue en disco" "$(wc -c < "$T/w/iota/data/huge file.bin" | tr -d ' ')" "3000"
+has   "iota: queda en .gitignore" "$(cat "$T/w/iota/.gitignore")" "/data/huge file.bin"
+has   "iota: se conservó el commit posterior" "$(git -C "$T/w/iota" log --format=%s)" "later"
+check "iota: subió al remoto" "$(git -C "$T/iota.git" log -1 --format=%s main)" "Ignora archivos de más de 100MB (RepoWatch)"
+check "iota: copia de seguridad guardada" "$(git -C "$T/w/iota" for-each-ref refs/repowatch | wc -l | tr -d ' ')" "1"
+check "iota: árbol limpio" "$(git -C "$T/w/iota" status --porcelain | wc -l | tr -d ' ')" "0"
+has   "iota: fila synced" "$(row iota)" "synced|"
+n="$(cat "$C/pending_notification.txt")"
+has   "aviso de la excepción: iota" "$n" "iota: 1 archivo(s) de más de 100MB sacados de los commits sin subir"
+has   "aviso de la excepción: zeta" "$n" "zeta: 1 archivo(s) de más de 100MB añadidos a .gitignore"
+check "theta (sin límite de GitHub): intacto" "$(git -C "$T/w/theta" rev-list --objects HEAD | grep -c big2.bin)" "1"
+printf '%s' "$beta_override" > "$C/repo_overrides.txt"
+
 [ "$fail" -eq 0 ] && echo "TODO OK" || { echo "HAY FALLOS"; exit 1; }

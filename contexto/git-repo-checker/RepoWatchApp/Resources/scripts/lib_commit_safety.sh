@@ -43,7 +43,7 @@ find_large_files() {
         full="$dir/$path"
         [ -f "$full" ] || continue
         size="$(stat -f%z "$full" 2>/dev/null || echo 0)"
-        if [ "$size" -gt 104857600 ]; then
+        if [ "$size" -gt "${LARGE_FILE_BYTES:-104857600}" ]; then
             printf '%s (%d MB)\n' "$path" "$((size / 1048576))"
         fi
     done <<< "$status"
@@ -78,10 +78,10 @@ suggest_commit_message() {
     local status="$1" n_lines="$2"
     local files dirs
     if [ "$n_lines" -le 3 ]; then
-        files="$(printf '%s\n' "$status" | cut -c4- | sed 's/ -> .*//' | paste -sd ',' - | sed 's/,/, /g')"
+        files="$(printf '%s\n' "$status" | cut -c4- | sed 's/ -> .*//; s/^"//; s/"$//' | paste -sd ',' - | sed 's/,/, /g')"
         echo "Update $files"
     else
-        dirs="$(printf '%s\n' "$status" | cut -c4- | sed 's/ -> .*//' | awk -F/ 'NF>1{print $1} NF==1{print "raíz"}' | sort -u)"
+        dirs="$(printf '%s\n' "$status" | cut -c4- | sed 's/ -> .*//; s/^"//; s/"$//' | awk -F/ 'NF>1{print $1} NF==1{print "raíz"}' | sort -u)"
         if [ "$(printf '%s\n' "$dirs" | wc -l)" -gt 4 ]; then
             dirs="$(printf '%s\n' "$dirs" | head -n 4 | paste -sd ',' - | sed 's/,/, /g'), …"
         else
@@ -184,6 +184,125 @@ auto_pull() {
     return 0
 }
 
+# GitHub rechaza archivos de más de 100MB; otros remotos (discos locales,
+# servidores propios) no tienen ese límite, así que la excepción de abajo
+# (ignorar + reescribir commits sin subir) solo aplica a repos con remoto
+# GitHub. SIZE_LIMIT_REMOTE_PATTERN / LARGE_FILE_BYTES existen para las pruebas.
+has_size_limit() {
+    "$GIT_BIN" -C "$1" remote -v 2>/dev/null | grep -qE "${SIZE_LIMIT_REMOTE_PATTERN:-github\.com}"
+}
+
+# Línea para .gitignore de una ruta exacta: ancla con «/» y escapa lo que git
+# trata como comodín.
+gitignore_entry() {
+    printf '/%s\n' "$(printf '%s' "$1" | sed 's/[]\\[*?#!]/\\&/g')"
+}
+
+add_to_gitignore() {
+    local dir="$1" path="$2" entry
+    entry="$(gitignore_entry "$path")"
+    touch "$dir/.gitignore"
+    grep -qxF -- "$entry" "$dir/.gitignore" && return 0
+    [ -s "$dir/.gitignore" ] && [ -n "$(tail -c1 "$dir/.gitignore")" ] && echo >> "$dir/.gitignore"
+    printf '%s\n' "$entry" >> "$dir/.gitignore"
+}
+
+# Commit firmado (si corresponde) de lo ya stageado. $1 dir, $2 asunto.
+_commit_staged() {
+    local dir="$1" subject="$2" key
+    key="$(repo_get "$dir" signing_key "$SIGNING_KEY")"
+    if [ "$(repo_get "$dir" sign "$SIGN_COMMITS")" = "true" ] && [ -n "$key" ]; then
+        "$GIT_BIN" -C "$dir" -c gpg.format=ssh -c "user.signingkey=$key" commit -S -m "$subject" >/dev/null 2>&1
+    else
+        "$GIT_BIN" -C "$dir" commit -m "$subject" >/dev/null 2>&1
+    fi
+}
+
+# Archivos SIN TRACKEAR de más de 100MB: se agregan a .gitignore en vez de
+# commitearlos. Los trackeados no se tocan (ya están en el historial).
+# $1 dir, $2 status. Devuelve 0 si ignoró alguno. Avisa vía RW_NOTES.
+ignore_large_untracked() {
+    local dir="$1" status="$2" line path n=0 names=""
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        path="$(printf '%s' "$line" | sed 's/ ([0-9]* MB)$//')"
+        "$GIT_BIN" -C "$dir" ls-files --error-unmatch -- "$path" >/dev/null 2>&1 && continue
+        add_to_gitignore "$dir" "$path"
+        n=$((n + 1)); names="${names:+$names, }$line"
+    done < <(find_large_files "$status" "$dir")
+    [ "$n" -eq 0 ] && return 1
+    RW_NOTES+=("$(basename "$dir"): $n archivo(s) de más de 100MB añadidos a .gitignore, no se commitearon: $names")
+    return 0
+}
+
+# Blobs de más de 100MB dentro de los commits SIN SUBIR (los que no están en
+# ninguna ref remota): lo que haría que GitHub rechace el push. Un path por línea.
+large_blobs_unpushed() {
+    "$GIT_BIN" -C "$1" rev-list --objects HEAD --not --remotes 2>/dev/null | \
+        "$GIT_BIN" -C "$1" cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' 2>/dev/null | \
+        awk -v lim="${LARGE_FILE_BYTES:-104857600}" '$1=="blob" && $2+0>lim { print substr($0, length($1)+length($2)+3) "\t" int($2/1048576) }' | sort -u
+}
+
+# Excepción de tamaño: si los commits sin subir llevan archivos de más de
+# 100MB, los saca de ESOS commits (git filter-branch, solo lo no subido),
+# los pone en .gitignore y deja el archivo en el disco. Antes guarda una copia
+# del estado en refs/repowatch/backup/<fecha> (recuperable con git reset --hard).
+# 0 = arreglado (RW_NOTES avisa), 1 = nada que arreglar, 2 = no se pudo
+# (FIX_ERR; el repo queda como estaba).
+fix_large_unpushed() {
+    local dir="$1" name branch list tmp backup path size n=0 names="" ign=0
+    FIX_ERR=""
+    name="$(basename "$dir")"
+    list="$(large_blobs_unpushed "$dir")"
+    [ -z "$list" ] && return 1
+
+    branch="$("$GIT_BIN" -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    if [ -z "$branch" ] || [ "$branch" = "HEAD" ]; then FIX_ERR="HEAD separado: no se puede reescribir"; return 2; fi
+    if [ -e "$dir/.git/MERGE_HEAD" ] || [ -d "$dir/.git/rebase-merge" ] || [ -d "$dir/.git/rebase-apply" ]; then
+        FIX_ERR="hay un merge/rebase en curso"; return 2
+    fi
+    if [ -n "$("$GIT_BIN" -C "$dir" status --porcelain -uno 2>/dev/null)" ]; then
+        FIX_ERR="hay cambios sin commitear: no se puede reescribir el historial"; return 2
+    fi
+
+    backup="refs/repowatch/backup/$(date +%Y%m%d-%H%M%S)"
+    "$GIT_BIN" -C "$dir" update-ref "$backup" HEAD || { FIX_ERR="no se pudo guardar la copia de seguridad"; return 2; }
+
+    tmp="$(mktemp)"
+    printf '%s\n' "$list" | cut -f1 > "$tmp"
+    if ! FILTER_BRANCH_SQUELCH_WARNING=1 "$GIT_BIN" -C "$dir" filter-branch -f --prune-empty \
+        --index-filter "tr '\\n' '\\0' < '$tmp' | xargs -0 git rm --cached --ignore-unmatch -q --" \
+        -- HEAD --not --remotes >/dev/null 2>&1; then
+        "$GIT_BIN" -C "$dir" reset --hard "$backup" >/dev/null 2>&1
+        rm -f "$tmp"
+        FIX_ERR="falló la reescritura (el repo se dejó como estaba)"; return 2
+    fi
+    rm -f "$tmp"
+    "$GIT_BIN" -C "$dir" for-each-ref --format='%(refname)' refs/original 2>/dev/null | \
+        while IFS= read -r r; do "$GIT_BIN" -C "$dir" update-ref -d "$r"; done
+
+    # filter-branch deja el árbol de trabajo igual al HEAD nuevo, o sea borra del
+    # disco lo que ya no está trackeado: se restaura desde la copia.
+    while IFS=$'\t' read -r path size; do
+        [ -z "$path" ] && continue
+        if "$GIT_BIN" -C "$dir" cat-file -e "$backup:$path" 2>/dev/null && [ ! -e "$dir/$path" ]; then
+            mkdir -p "$(dirname "$dir/$path")"
+            "$GIT_BIN" -C "$dir" cat-file blob "$backup:$path" > "$dir/$path"
+        fi
+        add_to_gitignore "$dir" "$path"
+        n=$((n + 1)); names="${names:+$names, }$path (${size} MB)"
+    done <<< "$list"
+
+    "$GIT_BIN" -C "$dir" add .gitignore
+    if [ -n "$("$GIT_BIN" -C "$dir" diff --cached --name-only 2>/dev/null)" ]; then
+        _commit_staged "$dir" "Ignora archivos de más de 100MB (RepoWatch)" || ign=1
+    fi
+    [ "$ign" -eq 1 ] && "$GIT_BIN" -C "$dir" reset >/dev/null 2>&1
+
+    RW_NOTES+=("$name: $n archivo(s) de más de 100MB sacados de los commits sin subir y añadidos a .gitignore (siguen en tu disco): $names. Copia del estado anterior: $backup")
+    return 0
+}
+
 _as_skip() {
     AUTOSYNC_WHY="$2"
     echo "autosync omitido ($(basename "$1")): $2" >&2
@@ -216,7 +335,12 @@ autosync_commit() {
     fi
 
     if [ -n "$(find_large_files "$status" "$dir")" ]; then
-        _as_skip "$dir" "archivo(s) de más de 100MB"; return 1
+        if has_size_limit "$dir" && ignore_large_untracked "$dir" "$status"; then
+            status="$("$GIT_BIN" -C "$dir" -c core.quotepath=false status --porcelain --untracked-files=all 2>/dev/null)"
+        fi
+        if [ -n "$(find_large_files "$status" "$dir")" ]; then
+            _as_skip "$dir" "archivo(s) de más de 100MB"; return 1
+        fi
     fi
 
     if [ "$(repo_get "$dir" stage all)" = "tracked" ]; then

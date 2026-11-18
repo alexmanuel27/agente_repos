@@ -159,3 +159,17 @@ su transporte (SSH/HTTPS). Entrar a un repo permite editar la URL de cada
 remoto, «Pasar a SSH», probar que responde, vigilarlo o no, y elegir su modo
 (global / automático / manual). «Pasar N repo(s) a SSH» convierte todos los
 de la carpeta y deja en HTTPS los que no respondan por SSH.
+
+## Excepción de archivos de más de 100MB (repos con remoto GitHub)
+
+GitHub rechaza archivos >100MB, así que en modo automático, antes del push:
+los archivos grandes **sin trackear** se añaden a `.gitignore` y no se
+commitean; si ya están en commits **sin subir** (los que no están en ninguna
+ref remota), se sacan de esos commits con `git filter-branch`, se ignoran y se
+hace un commit «Ignora archivos de más de 100MB (RepoWatch)»; luego sigue el
+push. El archivo nunca se borra del disco (filter-branch lo borraría; se
+restaura desde la copia). Antes de reescribir se guarda
+`refs/repowatch/backup/<fecha>` (recuperable con `git reset --hard <ref>`).
+Siempre avisa con una notificación. Solo toca lo no subido, con árbol limpio,
+y no aplica a repos sin remoto GitHub (ej. `nube`, discos locales). Los
+commits reescritos pierden su firma SSH. Prueba: `tests/test_autosync.sh`.
