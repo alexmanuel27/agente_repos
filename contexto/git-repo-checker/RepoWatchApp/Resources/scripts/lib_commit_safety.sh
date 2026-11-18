@@ -73,7 +73,7 @@ record_commit() {
 }
 
 # Sugiere un mensaje de commit a partir de los archivos cambiados: lista los
-# nombres si son pocos, o las carpetas de nivel superior si son muchos.
+# nombres si son pocos, o las carpetas de nivel superior (hasta 4) si son muchos.
 suggest_commit_message() {
     local status="$1" n_lines="$2"
     local files dirs
@@ -81,93 +81,174 @@ suggest_commit_message() {
         files="$(printf '%s\n' "$status" | cut -c4- | sed 's/ -> .*//' | paste -sd ',' - | sed 's/,/, /g')"
         echo "Update $files"
     else
-        dirs="$(printf '%s\n' "$status" | cut -c4- | sed 's/ -> .*//' | awk -F/ 'NF>1{print $1} NF==1{print "raíz"}' | sort -u | paste -sd ',' - | sed 's/,/, /g')"
+        dirs="$(printf '%s\n' "$status" | cut -c4- | sed 's/ -> .*//' | awk -F/ 'NF>1{print $1} NF==1{print "raíz"}' | sort -u)"
+        if [ "$(printf '%s\n' "$dirs" | wc -l)" -gt 4 ]; then
+            dirs="$(printf '%s\n' "$dirs" | head -n 4 | paste -sd ',' - | sed 's/,/, /g'), …"
+        else
+            dirs="$(printf '%s\n' "$dirs" | paste -sd ',' - | sed 's/,/, /g')"
+        fi
         echo "Update $n_lines files ($dirs)"
     fi
 }
 
-# Commit + push headless para repos en modo autosync. $1 = directorio,
-# $2 = salida de git status (ya calculada por el caller). Devuelve 1 (y no
-# toca el repo) si cualquier guarda de seguridad salta, para que el caller
-# lo trate como un repo normal en modo revisión en vez de fallar en silencio.
+# $1 = directorio. Imprime la ruta de la nota del vault que lista este repo
+# (línea «- `ruta`» en su sección Repositorios); la más reciente si hay varias.
+vault_project_note() {
+    [ -n "$VAULT_DIR" ] && [ -d "$VAULT_DIR" ] || return 0
+    local f best=""
+    while IFS= read -r f; do
+        case "$f" in */vault_backups/*|*"Mantenimiento del vault.md") continue ;; esac
+        if [ -z "$best" ] || [ "$f" -nt "$best" ]; then best="$f"; fi
+    done < <(grep -rlF --include='*.md' -- "- \`$1\`" "$VAULT_DIR" 2>/dev/null)
+    printf '%s' "$best"
+}
+
+# Arma COMMIT_SUBJECT / COMMIT_BODY. Sin IA: el asunto sale de los archivos
+# cambiados, con el título del proyecto del vault delante; el cuerpo cita la
+# última línea del Registro de esa nota solo si es de los últimos 7 días
+# (una nota vieja daría un contexto falso). $1 dir, $2 status, $3 nº de líneas.
+vault_commit_message() {
+    local dir="$1" status="$2" n="$3" note title reg d cutoff txt
+    COMMIT_SUBJECT="$(suggest_commit_message "$status" "$n")"
+    COMMIT_BODY=""
+    note="$(vault_project_note "$dir")"
+    [ -n "$note" ] || return 0
+    title="$(sed -n 's/^# //p' "$note" | head -n 1)"
+    [ -n "$title" ] && COMMIT_SUBJECT="$title: $COMMIT_SUBJECT"
+    reg="$(grep -E '^- [0-9]{4}-[0-9]{2}-[0-9]{2}' "$note" | tail -n 1)"
+    [ -n "$reg" ] || return 0
+    d="${reg:2:10}"
+    cutoff="$(date -v-7d +%Y-%m-%d)"
+    [[ "$d" < "$cutoff" ]] && return 0
+    txt="${reg#*— }"
+    if [ "${#txt}" -gt 160 ]; then
+        txt="$(printf '%s' "${txt:0:160}" | sed 's/ [^ ]*$//')…"
+    fi
+    COMMIT_BODY="Contexto (vault, $d): $txt"
+}
+
+# Sube al primer remoto que responda. 0 = subido, 1 = ningún remoto
+# alcanzable (esperado con discos externos desconectados), 2 = el push
+# falló con remoto alcanzable (AUTO_PUSH_ERR).
+auto_push() {
+    local dir="$1" r remote="" out
+    AUTO_PUSH_ERR=""
+    for r in $("$GIT_BIN" -C "$dir" remote); do
+        if "$GIT_BIN" -C "$dir" ls-remote --exit-code "$r" >/dev/null 2>&1; then
+            remote="$r"
+            break
+        fi
+    done
+    [ -z "$remote" ] && return 1
+    if out="$("$GIT_BIN" -C "$dir" push "$remote" 2>&1)"; then return 0; fi
+    AUTO_PUSH_ERR="$(printf '%s\n' "$out" | grep -v '^$' | tail -n 1)"
+    return 2
+}
+
+# Trae lo del upstream (el fetch ya se hizo). Sin commits locales por subir:
+# fast-forward. Con commits por subir (divergido): merge, y si choca se
+# aborta y se reporta como conflicto — nunca se deja el repo a medias.
+# Deja AUTO_PULL_N (commits traídos) y AUTO_PULL_ERR. 0 = bien o nada que hacer.
+auto_pull() {
+    local dir="$1" behind ahead out rc key
+    AUTO_PULL_N=0; AUTO_PULL_ERR=""
+    behind="$("$GIT_BIN" -C "$dir" rev-list --count 'HEAD..@{u}' 2>/dev/null)"
+    [ -z "$behind" ] || [ "$behind" -eq 0 ] && return 0
+    if [ -e "$dir/.git/MERGE_HEAD" ] || [ -d "$dir/.git/rebase-merge" ] || [ -d "$dir/.git/rebase-apply" ]; then
+        AUTO_PULL_ERR="hay un merge/rebase en curso"; return 1
+    fi
+    if [ -n "$("$GIT_BIN" -C "$dir" status --porcelain -uno 2>/dev/null)" ]; then
+        AUTO_PULL_ERR="cambios sin commitear impiden el pull"; return 1
+    fi
+    ahead="$("$GIT_BIN" -C "$dir" rev-list --count '@{u}..HEAD' 2>/dev/null)"
+    if [ "$ahead" -eq 0 ]; then
+        out="$("$GIT_BIN" -C "$dir" pull --ff-only 2>&1)"; rc=$?
+    else
+        key="$(repo_get "$dir" signing_key "$SIGNING_KEY")"
+        if [ "$(repo_get "$dir" sign "$SIGN_COMMITS")" = "true" ] && [ -n "$key" ]; then
+            out="$("$GIT_BIN" -C "$dir" -c gpg.format=ssh -c "user.signingkey=$key" pull --no-rebase --no-edit -S 2>&1)"; rc=$?
+        else
+            out="$("$GIT_BIN" -C "$dir" pull --no-rebase --no-edit 2>&1)"; rc=$?
+        fi
+    fi
+    if [ "$rc" -ne 0 ]; then
+        if [ -e "$dir/.git/MERGE_HEAD" ]; then
+            "$GIT_BIN" -C "$dir" merge --abort >/dev/null 2>&1
+            AUTO_PULL_ERR="conflicto al traer cambios del remoto (se abortó el merge)"
+        else
+            AUTO_PULL_ERR="pull falló: $(printf '%s\n' "$out" | grep -v '^$' | tail -n 1)"
+        fi
+        return 1
+    fi
+    AUTO_PULL_N="$behind"
+    return 0
+}
+
+_as_skip() {
+    AUTOSYNC_WHY="$2"
+    echo "autosync omitido ($(basename "$1")): $2" >&2
+}
+
+# Commit headless (sin push: lo hace el caller tras el pull) para repos en
+# modo autosync. $1 = directorio, $2 = salida de git status ya calculada.
+# Devuelve 1 (sin tocar el repo, motivo en AUTOSYNC_WHY) si cualquier guarda
+# de seguridad salta; el caller lo trata como problema a revisar a mano.
 autosync_commit() {
-    local dir="$1" status="$2"
-    local name; name="$(basename "$dir")"
+    local dir="$1" status="$2" branch msg_args commit_ok=1 sign_mode signing_key out n_lines
+    AUTOSYNC_WHY=""
 
     if [ -e "$dir/.git/MERGE_HEAD" ] || [ -d "$dir/.git/rebase-merge" ] || \
        [ -d "$dir/.git/rebase-apply" ] || [ -e "$dir/.git/CHERRY_PICK_HEAD" ]; then
-        echo "autosync omitido ($name): merge/rebase/cherry-pick en curso" >&2
-        return 1
+        _as_skip "$dir" "hay un merge/rebase/cherry-pick en curso"; return 1
     fi
 
-    local branch; branch="$("$GIT_BIN" -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    branch="$("$GIT_BIN" -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)"
     if [ -z "$branch" ] || [ "$branch" = "HEAD" ]; then
-        echo "autosync omitido ($name): HEAD separado" >&2
-        return 1
+        _as_skip "$dir" "HEAD separado (sin rama)"; return 1
     fi
 
     if [ -z "$("$GIT_BIN" -C "$dir" config user.email)" ] || [ -z "$("$GIT_BIN" -C "$dir" config user.name)" ]; then
-        echo "autosync omitido ($name): falta user.name/user.email" >&2
-        return 1
+        _as_skip "$dir" "falta user.name/user.email"; return 1
     fi
 
     if [ -n "$(find_sensitive_files "$status")" ]; then
-        echo "autosync omitido ($name): posibles archivos sensibles" >&2
-        return 1
+        _as_skip "$dir" "posibles archivos sensibles ($(find_sensitive_files "$status" | head -n 2 | paste -sd ',' -))"; return 1
     fi
 
     if [ -n "$(find_large_files "$status" "$dir")" ]; then
-        echo "autosync omitido ($name): archivo(s) mayor(es) a 100MB" >&2
-        return 1
+        _as_skip "$dir" "archivo(s) de más de 100MB"; return 1
     fi
 
-    local stage_mode; stage_mode="$(repo_get "$dir" stage all)"
-    if [ "$stage_mode" = "tracked" ]; then
+    if [ "$(repo_get "$dir" stage all)" = "tracked" ]; then
         "$GIT_BIN" -C "$dir" add -u
     else
         "$GIT_BIN" -C "$dir" add -A
     fi
 
     if [ -n "$(find_secret_content "$dir")" ]; then
-        echo "autosync omitido ($name): posible secreto en el contenido de un archivo" >&2
         "$GIT_BIN" -C "$dir" reset >/dev/null 2>&1
-        return 1
+        _as_skip "$dir" "posible secreto dentro de un archivo"; return 1
     fi
 
-    local msg commit_ok=1 sign_mode signing_key
-    msg="Sync $(date "+%Y-%m-%d %H:%M")"
+    n_lines="$(printf '%s\n' "$status" | wc -l | tr -d ' ')"
+    vault_commit_message "$dir" "$status" "$n_lines"
+    msg_args=(-m "$COMMIT_SUBJECT")
+    [ -n "$COMMIT_BODY" ] && msg_args+=(-m "$COMMIT_BODY")
+
     sign_mode="$(repo_get "$dir" sign "$SIGN_COMMITS")"
     signing_key="$(repo_get "$dir" signing_key "$SIGNING_KEY")"
-
     if [ "$sign_mode" = "true" ] && [ -n "$signing_key" ]; then
-        "$GIT_BIN" -C "$dir" -c gpg.format=ssh -c "user.signingkey=$signing_key" commit -S -m "$msg" >/dev/null 2>&1 || commit_ok=0
+        out="$("$GIT_BIN" -C "$dir" -c gpg.format=ssh -c "user.signingkey=$signing_key" commit -S "${msg_args[@]}" 2>&1)" || commit_ok=0
     else
-        "$GIT_BIN" -C "$dir" commit -m "$msg" >/dev/null 2>&1 || commit_ok=0
+        out="$("$GIT_BIN" -C "$dir" commit "${msg_args[@]}" 2>&1)" || commit_ok=0
     fi
 
     if [ "$commit_ok" -ne 1 ]; then
-        echo "autosync: commit falló en $name" >&2
         "$GIT_BIN" -C "$dir" reset >/dev/null 2>&1
-        return 1
+        _as_skip "$dir" "el commit falló: $(printf '%s\n' "$out" | grep -v '^$' | tail -n 1)"; return 1
     fi
 
-    local pushed=0
-    local push_mode; push_mode="$(repo_get "$dir" push auto)"
-    if [ "$push_mode" != "never" ]; then
-        local push_remote=""
-        for r in $("$GIT_BIN" -C "$dir" remote); do
-            if "$GIT_BIN" -C "$dir" ls-remote --exit-code "$r" >/dev/null 2>&1; then
-                push_remote="$r"
-                break
-            fi
-        done
-        if [ -n "$push_remote" ] && "$GIT_BIN" -C "$dir" push "$push_remote" >/dev/null 2>&1; then
-            pushed=1
-        fi
-    fi
-
-    record_commit "$dir" "$pushed"
-    AUTOSYNC_PUSHED="$pushed"
+    record_commit "$dir" 0
     return 0
 }
 

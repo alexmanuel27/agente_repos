@@ -16,3 +16,11 @@ repo_get() {
         echo "$default"
     fi
 }
+
+# Modo del repo: su override "mode", o el global (auto_mode=true → autosync,
+# si no → review). Requiere load_settings ya llamado.
+repo_mode() {
+    local def=review
+    [ "$AUTO_MODE" = "true" ] && def=autosync
+    repo_get "$1" mode "$def"
+}

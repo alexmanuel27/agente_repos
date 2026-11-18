@@ -37,11 +37,13 @@ struct PreferencesView: View {
     @State private var signCommits: Bool
     @State private var signingKey: String
     @State private var vaultDir: String
+    @State private var autoMode: Bool
     @State private var vaultRunning = false
     @State private var vaultSummary: String? = RepoWatchConfig.vaultSummary()
     @State private var autosyncRepos: Set<String>
     @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
     @State private var historyText: String = ""
+    @State private var detailRepo: String?
 
     init() {
         let settings = RepoWatchConfig.readSettings()
@@ -49,8 +51,8 @@ struct PreferencesView: View {
         _signCommits = State(initialValue: settings["sign_commits"] == "true")
         _signingKey = State(initialValue: settings["signing_key"] ?? "")
         _vaultDir = State(initialValue: settings["vault_dir"] ?? "")
-        let synced = RepoWatchConfig.readOverrides().filter { $0.value["mode"] == "autosync" }.keys
-        _autosyncRepos = State(initialValue: Set(synced))
+        _autoMode = State(initialValue: settings["auto_mode"] == "true")
+        _autosyncRepos = State(initialValue: Set(RepoWatchConfig.repos.filter(RepoWatchConfig.isAutosync)))
     }
 
     var body: some View {
@@ -79,6 +81,9 @@ struct PreferencesView: View {
         }
         .frame(width: 660, height: 480)
         .background(.regularMaterial)
+        .sheet(item: Binding(get: { detailRepo.map(DetailTarget.init) }, set: { detailRepo = $0?.path })) { t in
+            RepoDetailSheet(path: t.path)
+        }
     }
 
     // MARK: Sidebar
@@ -126,9 +131,18 @@ struct PreferencesView: View {
     // MARK: Cards
 
     private var foldersCard: some View {
-        card(title: "Carpetas vigiladas", subtitle: "Se revisa cada repo que haya directamente adentro.") {
-            pathList(watchFolders, icon: "folder.fill") { path in
-                watchFolders.removeAll { $0 == path }; save()
+        card(title: "Carpetas vigiladas", subtitle: "Se revisa cada repo que haya directamente adentro. Despliega una carpeta para ver sus repos y entrar a ajustar cada uno (remoto, modo, vigilarlo o no).") {
+            if watchFolders.isEmpty {
+                Label("Ninguna todavía", systemImage: "tray")
+                    .foregroundStyle(.secondary).font(.system(size: 12))
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(watchFolders, id: \.self) { folder in
+                        FolderRow(path: folder) {
+                            watchFolders.removeAll { $0 == folder }; save()
+                        }
+                    }
+                }
             }
             addButton("Agregar carpeta…") { addFolder() }
         }
@@ -136,7 +150,7 @@ struct PreferencesView: View {
 
     private var reposCard: some View {
         card(title: "Repos individuales", subtitle: "Rutas sueltas, para repos fuera de las carpetas vigiladas. \"Sync\" = commit y push automáticos, sin preguntar, para carpetas de sincronización en vez de proyectos.") {
-            pathList(repos, icon: "arrow.triangle.branch", showSyncToggle: true) { path in
+            pathList(repos, icon: "arrow.triangle.branch", showSyncToggle: true, onDetail: { detailRepo = $0 }) { path in
                 repos.removeAll { $0 == path }; save()
             }
             addButton("Agregar repo…") { addRepo() }
@@ -145,6 +159,22 @@ struct PreferencesView: View {
 
     private var scheduleCard: some View {
         card(title: "Horario", subtitle: "Cada cuánto se revisan todos los repos vigilados.") {
+            Toggle(isOn: $autoMode) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Modo automático", systemImage: "bolt.fill")
+                    Text("En cada revisión hace solo commit (mensaje armado con el vault), pull y push de todos los repos, sin preguntar. Solo te avisa si hay un problema o un conflicto. Cada repo puede salirse en «Repos individuales».")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
+            .tint(brandPurple)
+            .onChange(of: autoMode) { _, _ in
+                save()
+                autosyncRepos = Set(RepoWatchConfig.repos.filter(RepoWatchConfig.isAutosync))
+            }
+
+            Divider().padding(.vertical, 4)
+
             HStack(spacing: 14) {
                 Text("\(Int(intervalMinutes))")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
@@ -298,6 +328,7 @@ struct PreferencesView: View {
     @ViewBuilder
     private func pathList(
         _ paths: [String], icon: String, showSyncToggle: Bool = false,
+        onDetail: ((String) -> Void)? = nil,
         onRemove: @escaping (String) -> Void
     ) -> some View {
         if paths.isEmpty {
@@ -316,6 +347,13 @@ struct PreferencesView: View {
                         Spacer()
                         if showSyncToggle {
                             syncModeMenu(for: path)
+                        }
+                        if let onDetail {
+                            Button { onDetail(path) } label: {
+                                Image(systemName: "slider.horizontal.3").foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Ajustes del repo")
                         }
                         Button(action: { withAnimation(.easeInOut(duration: 0.18)) { onRemove(path) } }) {
                             Image(systemName: "trash").foregroundStyle(.secondary)
@@ -369,6 +407,7 @@ struct PreferencesView: View {
             "sign_commits": signCommits ? "true" : "false",
             "signing_key": signingKey,
             "vault_dir": vaultDir,
+            "auto_mode": autoMode ? "true" : "false",
         ])
         NotificationCenter.default.post(name: .repoWatchConfigChanged, object: nil)
     }
@@ -435,4 +474,9 @@ struct PreferencesView: View {
             save()
         }
     }
+}
+
+struct DetailTarget: Identifiable {
+    let path: String
+    var id: String { path }
 }

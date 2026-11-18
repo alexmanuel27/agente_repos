@@ -13,6 +13,7 @@ GIT_BIN="$(command -v git)"
 while IFS=$'\t' read -r dir sha pushed; do
     [ -z "$dir" ] && continue
     [ "$pushed" = "1" ] && continue
+    [ -n "$("$GIT_BIN" -C "$dir" branch -r --contains "$sha" 2>/dev/null)" ] && continue
     current="$("$GIT_BIN" -C "$dir" rev-parse HEAD 2>/dev/null)"
     [ "$current" = "$sha" ] && printf '%s\t%s\n' "$dir" "$(basename "$dir")"
 done < "$LAST_COMMITS_FILE"

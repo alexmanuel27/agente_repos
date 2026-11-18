@@ -29,6 +29,11 @@ if [ "$pushed" = "1" ]; then
     exit 1
 fi
 
+if [ -n "$("$GIT_BIN" -C "$dir" branch -r --contains "$recorded_sha" 2>/dev/null)" ]; then
+    osascript -e "display alert \"No se puede deshacer\" message \"El último commit en $name ya está en un remoto.\"" >/dev/null 2>&1
+    exit 1
+fi
+
 if [ "$current_sha" != "$recorded_sha" ]; then
     osascript -e "display alert \"No se puede deshacer\" message \"El HEAD de $name cambió desde el último commit de RepoWatch (hay commits más nuevos encima).\"" >/dev/null 2>&1
     exit 1

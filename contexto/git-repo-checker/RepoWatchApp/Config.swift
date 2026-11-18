@@ -15,7 +15,8 @@ enum RepoWatchConfig {
     static var watchFoldersFile: URL { configDir.appendingPathComponent("watch_folders.txt") }
     static var reposFile: URL { configDir.appendingPathComponent("repos.txt") }
     static var settingsFile: URL { configDir.appendingPathComponent("settings.txt") }
-    static var stateFile: URL { configDir.appendingPathComponent("last_check_state.txt") }
+    static var repoStatusFile: URL { configDir.appendingPathComponent("repo_status.tsv") }
+    static var checkLockDir: URL { configDir.appendingPathComponent(".check.lock") }
     static var lastCheckFile: URL { configDir.appendingPathComponent("last_check.txt") }
     static var overridesFile: URL { configDir.appendingPathComponent("repo_overrides.txt") }
     static var pendingNotificationFile: URL { configDir.appendingPathComponent("pending_notification.txt") }
@@ -117,13 +118,27 @@ enum RepoWatchConfig {
         if autosync {
             overrides[path] = ["mode": "autosync", "stage": "all", "push": "auto", "sign": "false"]
         } else {
-            overrides.removeValue(forKey: path)
+            // Explícito: con el modo automático global activo, quitar el override
+            // dejaría al repo en automático.
+            overrides[path] = ["mode": "review"]
         }
         writeOverrides(overrides)
     }
 
+    static func setOverride(_ path: String, _ key: String, _ value: String?) {
+        var all = readOverrides()
+        var d = all[path] ?? [:]
+        if let value { d[key] = value } else { d.removeValue(forKey: key) }
+        if d.isEmpty { all.removeValue(forKey: path) } else { all[path] = d }
+        writeOverrides(all)
+    }
+
+    static var autoMode: Bool { readSettings()["auto_mode"] == "true" }
+
+    // Modo efectivo: el override del repo, o el global.
     static func isAutosync(_ path: String) -> Bool {
-        readOverrides()[path]?["mode"] == "autosync"
+        guard let mode = readOverrides()[path]?["mode"] else { return autoMode }
+        return mode == "autosync"
     }
 }
 

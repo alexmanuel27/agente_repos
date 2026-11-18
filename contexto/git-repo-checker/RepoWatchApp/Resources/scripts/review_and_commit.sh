@@ -55,7 +55,6 @@ for dir in "${repos[@]}"; do
     name="$(basename "$dir")"
 
     [ "$(repo_get "$dir" enabled true)" = "false" ] && continue
-    [ "$(repo_get "$dir" mode review)" = "autosync" ] && continue
 
     if [ "$(repo_get "$dir" untracked include)" = "ignore" ]; then
         status_short="$("$GIT_BIN" -C "$dir" status --short -uno 2>/dev/null)"

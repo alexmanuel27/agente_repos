@@ -138,3 +138,24 @@ RepoWatchApp/
 Los `.sh` quedan empacados en `Contents/Resources/scripts/` dentro del
 `.app` — la app es portable, no depende de nada fuera de sí misma más que
 del directorio de config del usuario.
+
+
+## Modo automático (Preferencias → Horario)
+
+Con el interruptor activo, cada revisión hace sola, en todos los repos que no
+estén en modo manual: commit (asunto = título del proyecto en el vault + lo
+cambiado; cuerpo = última línea del Registro de su nota si es de los últimos
+7 días, sin IA), pull (ff-only; merge si hay commits propios; si choca se
+aborta) y push (al primer remoto que responda). Solo avisa de **problemas**
+(conflicto, archivo sensible o >100MB, push rechazado, commit fallido) y solo
+cuando el problema cambia o pasan 24 h. El panel de la barra superior lee
+`repo_status.tsv` cada 2 s: una fila por repo (ok / actuó solo / en espera /
+problema). Prueba: `RepoWatchApp/tests/test_autosync.sh`.
+
+## Carpetas → repos → ajustes por repo
+
+En Preferencias → Carpetas cada carpeta se despliega y lista sus repos con
+su transporte (SSH/HTTPS). Entrar a un repo permite editar la URL de cada
+remoto, «Pasar a SSH», probar que responde, vigilarlo o no, y elegir su modo
+(global / automático / manual). «Pasar N repo(s) a SSH» convierte todos los
+de la carpeta y deja en HTTPS los que no respondan por SSH.
