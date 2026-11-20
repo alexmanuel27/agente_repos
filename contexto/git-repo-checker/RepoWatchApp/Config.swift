@@ -51,6 +51,19 @@ enum RepoWatchConfig {
         return "Última revisión \(when): \(p[2]) cambio(s) aplicado(s), \(p[1]) aviso(s)."
     }
 
+    // "epoch estado nº" de la última corrección con Claude (vault_ai_last.txt).
+    static func vaultAISummary() -> String? {
+        let url = configDir.appendingPathComponent("vault_ai_last.txt")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let p = text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard p.count == 3, let epoch = Double(p[0]) else { return nil }
+        let minutes = Int((Date().timeIntervalSince1970 - epoch) / 60)
+        let when = minutes < 60 ? "hace \(max(minutes, 0)) min" : "hace \(minutes / 60) h"
+        return p[1] == "fallo"
+            ? "Último intento con Claude \(when): falló (revisa la notificación; suele ser la sesión de claude)."
+            : "Última corrección con Claude \(when): \(p[2]) nota(s) modificada(s)."
+    }
+
     static var scriptsDir: String { Bundle.main.resourcePath! + "/scripts" }
 
     private static func readLines(_ url: URL) -> [String] {

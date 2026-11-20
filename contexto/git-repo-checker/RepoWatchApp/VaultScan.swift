@@ -105,6 +105,8 @@ enum VaultScan {
                 flush(); title = "Cambios aplicados automáticamente"
             } else if line.hasPrefix("### ") {
                 flush(); title = String(line.dropFirst(4))
+            } else if line.hasPrefix("## Última corrección") {
+                flush(); title = String(line.dropFirst(3))
             } else if line.hasPrefix("## ") {
                 flush(); title = nil
             } else if line.hasPrefix("- "), title != nil, line != "- Ninguno." {

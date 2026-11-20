@@ -22,8 +22,9 @@ check("la Ficha no incluye otras secciones", byTitle["Fresca"]?.ficha.contains("
 
 let r = VaultScan.report(at: URL(fileURLWithPath: reportPath))
 check("fecha del informe", r.generated == "2026-11-15 10:00")
-check("secciones con elementos, sin «Ninguno.»", r.sections.map(\.title) == ["Cambios aplicados automáticamente", "Enlaces rotos"])
-check("elementos del informe", r.sections.last?.items == ["Nota R → «Rota»"])
+check("secciones con elementos, sin «Ninguno.»", r.sections.map(\.title) == ["Cambios aplicados automáticamente", "Enlaces rotos", "Última corrección con Claude (2026-11-20 03:00)"])
+check("elementos del informe", r.sections[1].items == ["Nota R → «Rota»"])
+check("sección de Claude leída", r.sections.last?.items == ["IA compartida/Larga — movió el exceso a Detalle"])
 check("informe inexistente no rompe", VaultScan.report(at: URL(fileURLWithPath: "/no/existe.md")).sections.isEmpty)
 
 exit(fail ? 1 : 0)

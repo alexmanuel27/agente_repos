@@ -31,6 +31,9 @@ Generado: 2026-11-15 10:00
 
 ### Enlaces rotos
 - Nota R → «Rota»
+
+## Última corrección con Claude (2026-11-20 03:00)
+- IA compartida/Larga — movió el exceso a Detalle
 EOF
 
 cp "$DIR/VaultScan.swift" "$T/VaultScan.swift"

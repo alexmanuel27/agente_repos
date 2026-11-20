@@ -109,7 +109,7 @@ vault_ai_fix() {
     fi
     claude_bin="$(_vault_ai_find_claude)" || { _vault_ai_fail "no encuentro el comando claude"; return 0; }
 
-    snap="$VAULT_BACKUPS_DIR/ai_$(date +%Y%m%d-%H%M%S)"
+    snap="$VAULT_BACKUPS_DIR/ai_$(date +%Y%m%d-%H%M%S)_$$_$RANDOM"
     mkdir -p "$VAULT_BACKUPS_DIR"
     cp -R "$VAULT_ROOT" "$snap" || { _vault_ai_fail "no pude hacer la copia previa"; return 0; }
     ls -1d "$VAULT_BACKUPS_DIR"/ai_* 2>/dev/null | sort -r | tail -n +4 | while IFS= read -r d; do rm -rf "$d"; done
@@ -119,7 +119,7 @@ vault_ai_fix() {
         cd "$VAULT_ROOT" || exit 1
         printf '%s' "$VAULT_AI_PROMPT" | PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" \
             perl -e 'alarm 900; exec @ARGV' "$claude_bin" -p --model "$VAULT_AI_MODEL" \
-            --permission-mode acceptEdits --no-session-persistence --strict-mcp-config --max-turns 60 \
+            --permission-mode acceptEdits --no-session-persistence --strict-mcp-config \
             --disallowedTools Bash WebFetch WebSearch --allowedTools Read Edit Glob Grep
     ) > "$out" 2> "$err"
     rc=$?

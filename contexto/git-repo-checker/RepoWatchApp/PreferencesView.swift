@@ -40,6 +40,8 @@ struct PreferencesView: View {
     @State private var autoMode: Bool
     @State private var vaultRunning = false
     @State private var vaultSummary: String? = RepoWatchConfig.vaultSummary()
+    @State private var vaultAI: Bool
+    @State private var vaultAISummary: String? = RepoWatchConfig.vaultAISummary()
     @State private var autosyncRepos: Set<String>
     @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
     @State private var historyText: String = ""
@@ -51,6 +53,7 @@ struct PreferencesView: View {
         _signCommits = State(initialValue: settings["sign_commits"] == "true")
         _signingKey = State(initialValue: settings["signing_key"] ?? "")
         _vaultDir = State(initialValue: settings["vault_dir"] ?? "")
+        _vaultAI = State(initialValue: settings["vault_ai"] == "true")
         _autoMode = State(initialValue: settings["auto_mode"] == "true")
         _autosyncRepos = State(initialValue: Set(RepoWatchConfig.repos.filter(RepoWatchConfig.isAutosync)))
     }
@@ -302,6 +305,39 @@ struct PreferencesView: View {
                 if !vaultRunning, let vaultSummary {
                     Text(vaultSummary).font(.system(size: 12)).foregroundStyle(.secondary)
                 }
+
+                Divider().padding(.vertical, 4)
+
+                Toggle(isOn: $vaultAI) {
+                    Label("Corregir los avisos con Claude cada 72 h", systemImage: "sparkles")
+                }
+                .toggleStyle(.switch)
+                .tint(brandPurple)
+                .onChange(of: vaultAI) { _, _ in save() }
+                Text("Sin preguntar y con decisiones conservadoras: recorta Fichas largas (el resto pasa tal cual a «Detalle»), arregla enlaces rotos evidentes y enlaza notas sueltas. Usa tu sesión de Claude Code (comando claude). Hace copia previa de todo el vault y deshace cualquier cambio que pierda texto, borre archivos o toque fechas.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Button {
+                        vaultRunning = true
+                        runScriptAsync("check_vault.sh", args: ["--ai"]) {
+                            vaultRunning = false
+                            vaultSummary = RepoWatchConfig.vaultSummary()
+                            vaultAISummary = RepoWatchConfig.vaultAISummary()
+                        }
+                    } label: {
+                        Label("Corregir con Claude ahora", systemImage: "wand.and.stars")
+                    }
+                    .tint(brandPurple)
+                    .disabled(vaultRunning)
+                    if vaultRunning {
+                        ProgressView().controlSize(.small)
+                        Text("Puede tardar varios minutos…")
+                            .font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                }
+                if !vaultRunning, let vaultAISummary {
+                    Text(vaultAISummary).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -407,6 +443,7 @@ struct PreferencesView: View {
             "sign_commits": signCommits ? "true" : "false",
             "signing_key": signingKey,
             "vault_dir": vaultDir,
+            "vault_ai": vaultAI ? "true" : "false",
             "auto_mode": autoMode ? "true" : "false",
         ])
         NotificationCenter.default.post(name: .repoWatchConfigChanged, object: nil)
