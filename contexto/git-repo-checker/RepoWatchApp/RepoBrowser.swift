@@ -90,6 +90,55 @@ struct TransportBadge: View {
     }
 }
 
+struct CommitRow: Identifiable {
+    let sha: String
+    let subject: String
+    let when: String
+    let unpushed: Bool
+    var id: String { sha }
+}
+
+// Foto del estado de un repo, para la ventana de ajustes. Síncrono: fuera del hilo principal.
+struct RepoState {
+    var branch = "—"
+    var changed = 0
+    var untracked = 0
+    var ahead: Int?      // vs. upstream; nil si no hay upstream
+    var behind: Int?
+    var unpushed = 0     // commits que no están en ninguna ref remota
+    var commits: [CommitRow] = []
+    var activity: [String] = []
+
+    static func load(_ dir: String) -> RepoState {
+        var st = RepoState()
+        st.branch = Git.run(dir, ["rev-parse", "--abbrev-ref", "HEAD"]).out
+        let status = Git.run(dir, ["-c", "core.quotepath=false", "status", "--porcelain", "--untracked-files=all"]).out
+        let lines = status.split(separator: "\n")
+        st.changed = lines.count
+        st.untracked = lines.filter { $0.hasPrefix("??") }.count
+        let lr = Git.run(dir, ["rev-list", "--left-right", "--count", "HEAD...@{u}"])
+        if lr.ok {
+            let n = lr.out.split(whereSeparator: { $0 == "\t" || $0 == " " }).compactMap { Int($0) }
+            if n.count == 2 { st.ahead = n[0]; st.behind = n[1] }
+        }
+        let unpushed = Git.run(dir, ["rev-list", "--abbrev-commit", "HEAD", "--not", "--remotes"]).out
+            .split(separator: "\n").map(String.init)
+        st.unpushed = unpushed.count
+        let log = Git.run(dir, ["log", "-12", "--date=format:%d/%m %H:%M", "--format=%h%x09%cd%x09%s"]).out
+        st.commits = log.split(separator: "\n").compactMap { line in
+            let p = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+            guard p.count == 3 else { return nil }
+            return CommitRow(sha: p[0], subject: p[2], when: p[1], unpushed: unpushed.contains(p[0]))
+        }
+        // Lo que RepoWatch hizo en este repo, del log de actividad.
+        let name = (dir as NSString).lastPathComponent
+        let text = (try? String(contentsOf: RepoWatchConfig.logFile, encoding: .utf8)) ?? ""
+        st.activity = text.split(separator: "\n").map(String.init)
+            .filter { $0.contains("] \(name): ") }.suffix(5).reversed()
+        return st
+    }
+}
+
 struct RepoInfo: Identifiable, Equatable {
     let path: String
     let remotes: [Remote]
@@ -249,6 +298,77 @@ struct RepoDetailSheet: View {
     @State private var loaded = false
     @State private var enabled = true
     @State private var mode = "global"
+    @State private var state: RepoState?
+
+    @ViewBuilder
+    private var stateSection: some View {
+        Text("Estado actual").font(.headline)
+        if let st = state {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.branch").foregroundStyle(.secondary)
+                    Text(st.branch).font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    Spacer()
+                }
+                stateLine(st.changed == 0 ? "checkmark.circle.fill" : "pencil.circle.fill",
+                          st.changed == 0 ? .green : .orange,
+                          st.changed == 0 ? "Sin cambios por commitear"
+                                          : "\(st.changed) archivo(s) sin commitear (\(st.untracked) nuevos)")
+                if let a = st.ahead, let b = st.behind {
+                    stateLine(b == 0 ? "checkmark.circle.fill" : "arrow.down.circle.fill", b == 0 ? .green : .orange,
+                              b == 0 ? "Al día con el remoto" : "\(b) commit(s) detrás del remoto")
+                    if a > 0 { stateLine("arrow.up.circle.fill", brandPurple, "\(a) commit(s) por subir al remoto") }
+                } else {
+                    stateLine("questionmark.circle", .secondary, "Sin upstream configurado")
+                    if st.unpushed > 0 { stateLine("arrow.up.circle.fill", brandPurple, "\(st.unpushed) commit(s) sin subir a ningún remoto") }
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+
+            Text("Historial").font(.headline)
+            if st.commits.isEmpty {
+                Text("Sin commits todavía.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(st.commits) { c in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(c.sha).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                            Text(c.subject).font(.system(size: 12)).lineLimit(1).truncationMode(.tail)
+                            Spacer(minLength: 4)
+                            if c.unpushed {
+                                Image(systemName: "arrow.up.circle.fill").font(.system(size: 10)).foregroundStyle(brandPurple)
+                                    .help("Todavía no está en ningún remoto")
+                            }
+                            Text(c.when).font(.system(size: 10)).foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 4)
+                        Divider()
+                    }
+                }
+            }
+
+            if !st.activity.isEmpty {
+                Text("Actividad de RepoWatch").font(.headline)
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(st.activity, id: \.self) { line in
+                        Text(line).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                            .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        } else {
+            ProgressView().controlSize(.small)
+        }
+    }
+
+    private func stateLine(_ icon: String, _ color: Color, _ text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).foregroundStyle(color).frame(width: 16)
+            Text(text).font(.system(size: 12))
+            Spacer()
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -257,6 +377,10 @@ struct RepoDetailSheet: View {
                 Text(path).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
             }
+
+            ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+            stateSection
 
             Text("Remotos").font(.headline)
             if !loaded {
@@ -304,11 +428,13 @@ struct RepoDetailSheet: View {
                 Text("Manual (te pregunta)").tag("review")
             }
             .onChange(of: mode) { _, m in RepoWatchConfig.setOverride(path, "mode", m == "global" ? nil : m) }
+            }
+            }
 
             HStack { Spacer(); Button("Listo") { dismiss() }.keyboardShortcut(.defaultAction).tint(brandPurple) }
         }
         .padding(20)
-        .frame(width: 520)
+        .frame(width: 520, height: 600)
         .onAppear(perform: load)
     }
 
@@ -318,7 +444,8 @@ struct RepoDetailSheet: View {
         mode = o["mode"] ?? "global"
         DispatchQueue.global().async {
             let list = Git.remotes(path)
-            DispatchQueue.main.async { remotes = list; original = list; loaded = true }
+            let st = RepoState.load(path)
+            DispatchQueue.main.async { remotes = list; original = list; loaded = true; state = st }
         }
     }
 
