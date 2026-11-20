@@ -20,6 +20,7 @@ VAULT_BACKUPS_DIR="$CONFIG_DIR/vault_backups"
 VAULT_WARNINGS_FILE="$CONFIG_DIR/vault_warnings.txt"
 VAULT_LAST_FILE="$CONFIG_DIR/vault_last.txt"
 VAULT_REPORT_NAME="Mantenimiento del vault"
+VAULT_AI_LOG="$CONFIG_DIR/vault_ai_log.md"   # sección que deja lib_vault_ai.sh; se añade al informe
 
 read -r -d '' VAULT_ORGANIZE_AWK <<'AWK'
 {
@@ -330,6 +331,7 @@ vault_check() {
         echo
         echo "### Repos con remoto vacío"
         _vault_list "${VAULT_EMPTY_REMOTE[@]}"
+        [ -f "$VAULT_AI_LOG" ] && { echo; cat "$VAULT_AI_LOG"; }
     } > "$VAULT_ROOT/$VAULT_REPORT_NAME.md"
 
     echo "$n_warn" > "$VAULT_WARNINGS_FILE"

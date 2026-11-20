@@ -9,6 +9,7 @@ INTERVAL_MINUTES=60
 SIGN_COMMITS=false
 SIGNING_KEY=""
 VAULT_DIR=""
+VAULT_AI=false
 AUTO_MODE=false
 
 load_settings() {
@@ -20,6 +21,7 @@ load_settings() {
             sign_commits) SIGN_COMMITS="$value" ;;
             signing_key) SIGNING_KEY="$value" ;;
             vault_dir) VAULT_DIR="$value" ;;
+            vault_ai) VAULT_AI="$value" ;;
             auto_mode) AUTO_MODE="$value" ;;
         esac
     done < "$SETTINGS_FILE"

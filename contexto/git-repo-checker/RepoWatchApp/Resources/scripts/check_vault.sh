@@ -23,12 +23,17 @@ PENDING_NOTIF_FILE="$CONFIG_DIR/pending_notification.txt"
 mkdir -p "$CONFIG_DIR/logs"
 
 source "$SCRIPT_DIR/lib_vault_check.sh"
+source "$SCRIPT_DIR/lib_vault_ai.sh"
 vault_check "$VAULT_DIR" 2>>"$LOG_FILE"
 
 read -r _ warn applied < "$VAULT_LAST_FILE"
 echo "[$(date "+%Y-%m-%d %H:%M:%S")] Vault revisado: $applied cambio(s) aplicado(s), $warn aviso(s)." >> "$LOG_FILE"
 
-if [ "$1" = "--manual" ]; then
+# --ai = botón «Corregir con Claude ahora» (ignora el interruptor y el plazo de 72 h).
+# La corrección con Claude manda su propio aviso.
+if [ "$1" = "--ai" ] || vault_ai_due; then
+    vault_ai_fix 2>>"$LOG_FILE"
+elif [ "$1" = "--manual" ]; then
     echo "Vault revisado: $applied cambio(s) aplicado(s), $warn aviso(s)." >> "$PENDING_NOTIF_FILE"
 elif [ "$warn" -gt 0 ]; then
     printf 'Vault: %s aviso(s) — ver «Mantenimiento del vault»\n' "$warn" >> "$PENDING_NOTIF_FILE"
