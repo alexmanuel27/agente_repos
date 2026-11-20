@@ -134,13 +134,20 @@ auto_push() {
     local dir="$1" r remote="" out
     AUTO_PUSH_ERR=""
     for r in $("$GIT_BIN" -C "$dir" remote); do
-        if "$GIT_BIN" -C "$dir" ls-remote --exit-code "$r" >/dev/null 2>&1; then
+        if "$GIT_BIN" -C "$dir" ls-remote "$r" >/dev/null 2>&1; then
             remote="$r"
             break
         fi
     done
     [ -z "$remote" ] && return 1
-    if out="$("$GIT_BIN" -C "$dir" push "$remote" 2>&1)"; then return 0; fi
+    # Rama sin upstream válido (nunca se subió, o la rama remota ya no existe):
+    # -u lo deja configurado. Con upstream válido se mantiene tal cual (no
+    # mover el upstream de nube a un disco de respaldo).
+    if "$GIT_BIN" -C "$dir" rev-parse --verify -q '@{u}' >/dev/null 2>&1; then
+        out="$("$GIT_BIN" -C "$dir" push "$remote" 2>&1)" && return 0
+    else
+        out="$("$GIT_BIN" -C "$dir" push -u "$remote" HEAD 2>&1)" && return 0
+    fi
     AUTO_PUSH_ERR="$(printf '%s\n' "$out" | grep -v '^$' | tail -n 1)"
     return 2
 }

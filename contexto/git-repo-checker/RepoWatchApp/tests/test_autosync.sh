@@ -106,6 +106,13 @@ n="$(cat "$C/pending_notification.txt")"
 has   "aviso de la excepción: iota" "$n" "iota: 1 archivo(s) de más de 100MB sacados de los commits sin subir"
 has   "aviso de la excepción: zeta" "$n" "zeta: 1 archivo(s) de más de 100MB añadidos a .gitignore"
 check "theta (sin límite de GitHub): intacto" "$(git -C "$T/w/theta" rev-list --objects HEAD | grep -c big2.bin)" "1"
+# kappa: remoto GitHub-style VACÍO (nunca se subió nada, como aqua_troll_500): debe subir y dejar upstream
+git init -q --bare "$T/kappa.git"; git clone -q "$T/kappa.git" "$T/w/kappa" 2>/dev/null
+( cd "$T/w/kappa" && echo a > a && git add a && git commit -qm uno )
+run
+has   "remoto vacío: se sube" "$(row kappa)" "synced|push de 1 commit(s)"
+check "remoto vacío: llegó al remoto" "$(git -C "$T/kappa.git" log -1 --format=%s main)" "uno"
+check "remoto vacío: queda upstream" "$(git -C "$T/w/kappa" rev-parse --abbrev-ref '@{u}')" "origin/main"
 printf '%s' "$beta_override" > "$C/repo_overrides.txt"
 
 [ "$fail" -eq 0 ] && echo "TODO OK" || { echo "HAY FALLOS"; exit 1; }

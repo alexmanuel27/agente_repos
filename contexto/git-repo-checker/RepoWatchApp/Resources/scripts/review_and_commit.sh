@@ -208,7 +208,7 @@ APPLESCRIPT
     if [ "$button" = "Commit + Push" ]; then
         push_remote=""
         for r in $("$GIT_BIN" -C "$dir" remote); do
-            if "$GIT_BIN" -C "$dir" ls-remote --exit-code "$r" >/dev/null 2>&1; then
+            if "$GIT_BIN" -C "$dir" ls-remote "$r" >/dev/null 2>&1; then
                 push_remote="$r"
                 break
             fi
