@@ -28,7 +28,7 @@ fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
 
 export GIT_TERMINAL_PROMPT=0
-export GIT_SSH_COMMAND='ssh -oBatchMode=yes -oConnectTimeout=10'
+export GIT_SSH_COMMAND="$RW_SSH"
 
 GIT_BIN="$(command -v git)"
 LOG_FILE="$CONFIG_DIR/logs/check_git_repos.log"

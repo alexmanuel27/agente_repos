@@ -25,7 +25,7 @@ fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
 
 export GIT_TERMINAL_PROMPT=0
-export GIT_SSH_COMMAND='ssh -oBatchMode=yes -oConnectTimeout=10'
+export GIT_SSH_COMMAND="$RW_SSH"
 
 LOG_FILE="$CONFIG_DIR/logs/check_git_repos.log"
 STATUS_FILE="$CONFIG_DIR/repo_status.tsv"
@@ -74,7 +74,7 @@ for dir in "${repos[@]}"; do
     committed=0; nofetch=0
 
     fetched=1
-    "$GIT_BIN" -C "$dir" fetch --quiet 2>/dev/null || fetched=0
+    fetch_out="$("$GIT_BIN" -C "$dir" fetch --quiet 2>&1)" || fetched=0
 
     if [ "$(repo_get "$dir" untracked include)" = "ignore" ]; then
         status_output="$("$GIT_BIN" -C "$dir" -c core.quotepath=false status --porcelain -uno 2>/dev/null)"
@@ -113,6 +113,7 @@ for dir in "${repos[@]}"; do
         fi
     else
         nofetch=1
+        fetch_why="$(printf '%s\n' "$fetch_out" | grep -v '^fatal: Could not read\|^$' | head -n 1)"
     fi
 
     # Excepción de tamaño (solo repos con remoto GitHub): si lo no subido lleva
@@ -143,7 +144,7 @@ for dir in "${repos[@]}"; do
         fi
     fi
 
-    [ "$nofetch" -eq 1 ] && [ ${#infos[@]} -eq 0 ] && infos+=("sin acceso al remoto")
+    [ "$nofetch" -eq 1 ] && [ ${#infos[@]} -eq 0 ] && infos+=("sin acceso al remoto${fetch_why:+ ($fetch_why)}")
 
     if [ ${#probs[@]} -gt 0 ]; then
         kind=problem

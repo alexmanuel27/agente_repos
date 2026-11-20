@@ -173,3 +173,18 @@ restaura desde la copia). Antes de reescribir se guarda
 Siempre avisa con una notificación. Solo toca lo no subido, con árbol limpio,
 y no aplica a repos sin remoto GitHub (ej. `nube`, discos locales). Los
 commits reescritos pierden su firma SSH. Prueba: `tests/test_autosync.sh`.
+
+## Una sola conexión SSH para todos los repos
+
+Los scripts usan `RW_SSH` (en `lib_discover_repos.sh`): SSH sin preguntar y con
+`ControlMaster`, o sea una conexión por host reutilizada por todos los repos.
+Sin eso, cada fetch/ls-remote/push abría una conexión nueva y GitHub cortaba
+con «Connection reset by peer», así que muchos repos salían como «remoto no
+disponible». El motivo real del fallo ahora se muestra en el panel.
+
+## Ficha de cada repo (Preferencias → Carpetas → repo)
+
+Además de remotos y modo, muestra el estado actual (rama, cambios sin
+commitear, atrás/adelante del remoto, commits sin subir), los últimos 12
+commits (con marca de los que aún no están en ningún remoto) y lo que
+RepoWatch hizo en ese repo según el log.
